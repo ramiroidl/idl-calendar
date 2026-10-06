@@ -60,7 +60,7 @@ export class IdlCalendar extends HTMLElement {
       <style>
         :host { display: block; color: #000; background: #fff; }
         ha-card {
-          box-sizing: border-box; padding: 20px; background: #fff; color: #000;
+          display: block; box-sizing: border-box; padding: 20px; background: #fff; color: #000;
           border: 2px solid #000; border-radius: 0; box-shadow: none;
           font-family: Arial, sans-serif; font-size: 18px; line-height: 1.3;
         }
