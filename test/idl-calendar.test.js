@@ -5,9 +5,14 @@ class Element {
   constructor() {
     this.children = [];
     this.textContent = "";
+    this.attributes = {};
+    this.listeners = {};
   }
   append(...children) { this.children.push(...children); }
   replaceChildren(...children) { this.children = children; }
+  setAttribute(name, value) { this.attributes[name] = value; }
+  addEventListener(name, listener) { this.listeners[name] = listener; }
+  click() { this.listeners.click?.(); }
 }
 
 globalThis.HTMLElement = class {
@@ -26,7 +31,7 @@ globalThis.document = { createElement: () => new Element() };
 globalThis.window = {};
 globalThis.customElements = { get() {}, define() {} };
 
-const { IdlCalendar, calendarRange, dateKey, normalizeEvent, sortEvents } =
+const { IdlCalendar, calendarRange, monthRange, eventsForDay, dateKey, normalizeEvent, sortEvents } =
   await import("../idl-calendar.js");
 
 test("calendar range starts at local midnight and spans calendar days", () => {
@@ -69,16 +74,18 @@ test("configuration rejects invalid entities and bounds and deduplicates calenda
   for (const config of [{}, { entities: [] }, { entities: ["sensor.test"] },
     { entities: ["calendar.test"], days: 0 }, { entities: ["calendar.test"], max_events: 51 },
     { entities: ["calendar.test"], refresh_interval: 1 },
-    { entities: ["calendar.test"], display_mode: "invalid" }]) {
+    { entities: ["calendar.test"], display_mode: "invalid" },
+    { entities: ["calendar.test"], view: "invalid" },
+    { entities: ["calendar.test"], week_start: 2 }]) {
     assert.throws(() => card.setConfig(config));
   }
   card.setConfig({ entities: ["calendar.test", "calendar.test"] });
   assert.deepEqual(card._config.entities, ["calendar.test"]);
 });
 
-function makeCard(entities, callApi) {
+function makeCard(entities, callApi, config = { view: "agenda" }) {
   const card = new IdlCalendar();
-  card.setConfig({ entities });
+  card.setConfig({ entities, ...config });
   card.isConnected = true;
   card._hass = { states: Object.fromEntries(entities.map((entity) =>
     [entity, { state: "off", attributes: { friendly_name: entity } }])), callApi };
@@ -158,4 +165,122 @@ test("limits displayed events and counts remaining events", async () => {
   await card._refresh();
   assert.equal(card.shadowRoot.querySelector("main").children[0].children[1].children.length, 8);
   assert.equal(card.shadowRoot.querySelector("#overflow").textContent, "+2 more events");
+});
+
+test("month ranges cover leap years and December rollover at local midnight", () => {
+  for (const [date, first, next] of [
+    [new Date(2024, 1, 29), "2024-02-01", "2024-03-01"],
+    [new Date(2026, 11, 31), "2026-12-01", "2027-01-01"],
+  ]) {
+    const { start, end } = monthRange(date);
+    assert.equal(dateKey(start), first);
+    assert.equal(dateKey(end), next);
+    assert.equal(start.getHours(), 0);
+    assert.equal(end.getHours(), 0);
+  }
+});
+
+test("day events include ongoing and multi-day events but exclude exclusive ends", () => {
+  const events = [
+    normalizeEvent({ start: "2026-10-05", end: "2026-10-07", summary: "Holiday" }, "Family"),
+    normalizeEvent({ start: "2026-10-05T23:00:00", end: "2026-10-06T01:00:00", summary: "Night" }, "Work"),
+    normalizeEvent({ start: "2026-10-05", end: "2026-10-06", summary: "Ended" }, "Family"),
+    normalizeEvent({ start: "2026-10-07", end: "2026-10-08", summary: "Tomorrow" }, "Family"),
+  ];
+  assert.deepEqual(eventsForDay(events, new Date(2026, 9, 6)).map(event => event.summary),
+    ["Holiday", "Night"]);
+});
+
+test("month is the default view and requests the entire native calendar month", async () => {
+  const calls = [];
+  const card = makeCard(["calendar.work"], async (...args) => {
+    calls.push(args);
+    return [todayEvent()];
+  }, {});
+  await card._refresh();
+  const { start, end } = monthRange();
+  const query = new URLSearchParams(calls[0][1].split("?")[1]);
+  assert.equal(calls[0][0], "GET");
+  assert.equal(query.get("start"), start.toISOString());
+  assert.equal(query.get("end"), end.toISOString());
+  assert.equal(card._config.view, "month");
+  assert.equal(card.shadowRoot.querySelector("#navigation").hidden, false);
+  assert.equal(card.shadowRoot.querySelector("main").children[1].children.length, 1);
+});
+
+test("month grid includes every date, handles six weeks, and selects day events locally", async () => {
+  const calls = [];
+  const card = makeCard(["calendar.work"], async (...args) => {
+    calls.push(args);
+    return [{ start: "2026-08-31", end: "2026-09-01", summary: "<b>Month end</b>" }];
+  }, { view: "month", max_events: 1 });
+  card._month = new Date(2026, 7, 1);
+  card._selectedDay = card._month;
+  await card._refresh();
+  const grid = card.shadowRoot.querySelector("#month");
+  const buttons = grid.children.filter(child => child.className === "day");
+  assert.equal(grid.children.length, 7 + 42);
+  assert.equal(buttons.length, 31);
+  assert.equal(buttons[30].children[0].textContent, "1 •");
+  buttons[30].click();
+  assert.equal(calls.length, 1);
+  const main = card.shadowRoot.querySelector("main");
+  assert.equal(main.children[1].children[0].children[1].textContent, "<b>Month end</b>");
+  assert.equal(card.shadowRoot.querySelector("#month").children
+    .filter(child => child.attributes["aria-pressed"] === "true")[0].textContent, "31");
+});
+
+test("Sunday-first grids, empty days, and per-day overflow are rendered correctly", async () => {
+  const card = makeCard(["calendar.work"], async () => [
+    { start: "2026-02-02", end: "2026-02-03", summary: "One" },
+    { start: "2026-02-02", end: "2026-02-03", summary: "Two" },
+  ], { view: "month", week_start: 0, max_events: 1 });
+  card._month = new Date(2026, 1, 1);
+  card._selectedDay = card._month;
+  await card._refresh();
+  let grid = card.shadowRoot.querySelector("#month");
+  assert.equal(grid.children.length, 7 + 28);
+  assert.equal(grid.children[7].textContent, "1");
+  assert.equal(card.shadowRoot.querySelector("main").children[2].textContent, "No events this day.");
+  grid.children[8].click();
+  assert.equal(card.shadowRoot.querySelector("#overflow").textContent, "+1 more events");
+  grid = card.shadowRoot.querySelector("#month");
+  grid.children[7].click();
+  assert.equal(card.shadowRoot.querySelector("#overflow").textContent, "");
+});
+
+test("navigation crosses year boundaries, resets the day, and Today returns to current month", async () => {
+  const calls = [];
+  const card = makeCard(["calendar.work"], async (...args) => {
+    calls.push(args);
+    return [];
+  }, { view: "month" });
+  card._month = new Date(2026, 11, 1);
+  card._changeMonth(1);
+  await card._refresh();
+  assert.equal(dateKey(card._month), "2027-01-01");
+  assert.equal(dateKey(card._selectedDay), "2027-01-01");
+  card._changeMonth(-1);
+  await card._refresh();
+  assert.equal(dateKey(card._month), "2026-12-01");
+  card.shadowRoot.querySelector("#today").click();
+  await card._refresh();
+  assert.equal(card._month, null);
+  assert.equal(card._selectedDay, null);
+  assert.ok(calls.every(call => call[0] === "GET"));
+});
+
+test("month navigation ignores stale responses from the previous month", async () => {
+  let resolveOld;
+  let count = 0;
+  const card = makeCard(["calendar.work"], async () => {
+    if (++count === 1) return new Promise(resolve => { resolveOld = resolve; });
+    return [];
+  }, { view: "month" });
+  const pending = card._refresh();
+  card._changeMonth(1);
+  await card._refresh();
+  resolveOld([todayEvent("Old month")]);
+  await pending;
+  assert.deepEqual(card._events, []);
 });

@@ -12,6 +12,17 @@ export function calendarRange(days, now = new Date()) {
   return { start, end };
 }
 
+export function monthRange(date = new Date()) {
+  const start = new Date(date.getFullYear(), date.getMonth(), 1);
+  const end = new Date(date.getFullYear(), date.getMonth() + 1, 1);
+  return { start, end };
+}
+
+export function eventsForDay(events, day) {
+  const { start, end } = calendarRange(1, day);
+  return events.filter((event) => event.start < end && event.end > start);
+}
+
 function eventDate(value) {
   if (typeof value !== "string") return null;
   if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
@@ -76,19 +87,47 @@ export class IdlCalendar extends HTMLElement {
         #status { margin: 12px 0 0; }
         #status:empty, #overflow:empty { display: none; }
         #overflow { margin: 12px 0 0; border-top: 1px solid #000; padding-top: 6px; }
+        [hidden] { display: none !important; }
+        button { font: inherit; color: #000; background: #fff; border: 1px solid #000;
+          border-radius: 0; cursor: pointer; }
+        button:focus-visible { outline: 3px solid #000; outline-offset: 2px; }
+        #navigation { display: flex; gap: 8px; margin: 10px 0; }
+        #content.month { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+          gap: 20px; }
+        #month { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr));
+          align-content: start; gap: 3px; }
+        .weekday { text-align: center; font-size: 14px; padding: 4px 0; }
+        .day { min-height: 42px; padding: 2px; }
+        .day[aria-pressed="true"] { background: #000; color: #fff; }
+        .day[aria-current="date"] { border: 3px solid #000; font-weight: bold; }
+        .count { display: block; font-size: 12px; }
+        #content.month h2 { margin-top: 0; }
+        #content.month li { grid-template-columns: 85px minmax(0, 1fr); gap: 8px; }
         :host([display-mode="trmnl"]) ha-card { width: 800px; height: 480px;
           overflow: hidden; }
         @media (max-width: 450px) {
           ha-card { padding: 12px; }
           li { grid-template-columns: 85px minmax(0, 1fr); gap: 8px; }
+          :host([display-mode="responsive"]) #content.month { grid-template-columns: minmax(0, 1fr); }
         }
       </style>
       <ha-card>
         <header><h1></h1><span id="range"></span></header>
         <p id="status" role="status" aria-live="polite"></p>
-        <main aria-label="Calendar events"></main>
+        <nav id="navigation" aria-label="Month navigation">
+          <button id="previous" aria-label="Previous month">‹</button>
+          <button id="today">Today</button>
+          <button id="next" aria-label="Next month">›</button>
+        </nav>
+        <div id="content">
+          <div id="month" aria-label="Month days"></div>
+          <main aria-label="Calendar events" aria-live="polite"></main>
+        </div>
         <p id="overflow"></p>
       </ha-card>`;
+    this.shadowRoot.querySelector("#previous").addEventListener("click", () => this._changeMonth(-1));
+    this.shadowRoot.querySelector("#next").addEventListener("click", () => this._changeMonth(1));
+    this.shadowRoot.querySelector("#today").addEventListener("click", () => this._changeMonth(0));
   }
 
   setConfig(config) {
@@ -101,6 +140,8 @@ export class IdlCalendar extends HTMLElement {
     const maxEvents = config.max_events ?? 8;
     const refresh = config.refresh_interval ?? 300;
     const display = config.display_mode ?? "responsive";
+    const view = config.view ?? "month";
+    const weekStart = config.week_start ?? 1;
     if (!Number.isInteger(days) || days < 1 || days > 14
         || !Number.isInteger(maxEvents) || maxEvents < 1 || maxEvents > 50
         || !Number.isInteger(refresh) || refresh < 60 || refresh > 86400) {
@@ -109,8 +150,14 @@ export class IdlCalendar extends HTMLElement {
     if (!["responsive", "trmnl"].includes(display)) {
       throw new Error("display_mode must be responsive or trmnl.");
     }
+    if (!["month", "agenda"].includes(view) || ![0, 1].includes(weekStart)) {
+      throw new Error("view must be month or agenda; week_start must be 0 (Sunday) or 1 (Monday).");
+    }
     this._config = { ...config, entities: [...new Set(config.entities)],
-      days, max_events: maxEvents, refresh_interval: refresh, display_mode: display };
+      days, max_events: maxEvents, refresh_interval: refresh, display_mode: display,
+      view, week_start: weekStart };
+    this._month = null;
+    this._selectedDay = null;
     this._request++;
     this._events = [];
     this._error = "";
@@ -139,7 +186,7 @@ export class IdlCalendar extends HTMLElement {
   }
 
   getCardSize() {
-    return this._config?.display_mode === "trmnl" ? 9 : 5;
+    return this._config?.display_mode === "trmnl" || this._config?.view === "month" ? 9 : 5;
   }
 
   static getStubConfig(hass) {
@@ -153,10 +200,27 @@ export class IdlCalendar extends HTMLElement {
     }
   }
 
+  _range() {
+    return this._config.view === "month" ? monthRange(this._month ?? new Date())
+      : calendarRange(this._config.days);
+  }
+
+  _changeMonth(offset) {
+    const { start } = this._range();
+    this._month = offset === 0 ? null
+      : new Date(start.getFullYear(), start.getMonth() + offset, 1);
+    this._selectedDay = this._month;
+    this._events = [];
+    this._error = "";
+    this._loading = true;
+    this._render();
+    void this._refresh();
+  }
+
   async _refresh() {
     if (!this._hass || !this._config || !this.isConnected) return;
     const request = ++this._request;
-    const { start, end } = calendarRange(this._config.days);
+    const { start, end } = this._range();
     const hass = this._hass;
     const entities = this._config.entities;
     this._lastFetch = Date.now();
@@ -184,21 +248,45 @@ export class IdlCalendar extends HTMLElement {
   _render() {
     if (!this._config) return;
     const root = this.shadowRoot;
-    const { start, end } = calendarRange(this._config.days);
+    let { start, end } = this._range();
+    const monthView = this._config.view === "month";
     const lastDay = new Date(end);
     lastDay.setDate(lastDay.getDate() - 1);
     root.querySelector("h1").textContent = this._config.title ?? "Calendar";
-    root.querySelector("#range").textContent = `${start.toLocaleDateString(undefined, DAY_FORMAT)} – ${lastDay.toLocaleDateString(undefined, DAY_FORMAT)}`;
+    root.querySelector("#range").textContent = monthView
+      ? start.toLocaleDateString(undefined, { month: "long", year: "numeric" })
+      : `${start.toLocaleDateString(undefined, DAY_FORMAT)} – ${lastDay.toLocaleDateString(undefined, DAY_FORMAT)}`;
     root.querySelector("#status").textContent = this._loading ? "Loading calendar…"
-      : this._error || (this._events.length ? "" : "No upcoming events.");
+      : this._error || (!monthView && !this._events.length ? "No upcoming events." : "");
+    root.querySelector("#navigation").hidden = !monthView;
+    root.querySelector("#month").hidden = !monthView;
+    root.querySelector("#content").className = monthView ? "month" : "";
     const main = root.querySelector("main");
     main.replaceChildren();
     let group;
     let key;
-    for (const event of this._events.slice(0, this._config.max_events)) {
+    let events = this._events;
+    if (monthView) {
+      const today = new Date();
+      const selected = this._selectedDay >= start && this._selectedDay < end
+        ? this._selectedDay : (today >= start && today < end ? today : start);
+      this._renderMonth(start, end, selected, today);
+      start = calendarRange(1, selected).start;
+      events = eventsForDay(this._events, selected);
+      const heading = document.createElement("h2");
+      heading.textContent = selected.toLocaleDateString(undefined, DAY_FORMAT);
+      group = document.createElement("ul");
+      main.append(heading, group);
+      if (!this._loading && !events.length) {
+        const empty = document.createElement("p");
+        empty.textContent = this._error ? "Day events unavailable or incomplete." : "No events this day.";
+        main.append(empty);
+      }
+    }
+    for (const event of events.slice(0, this._config.max_events)) {
       const day = event.start < start ? start : event.start;
       const nextKey = dateKey(day);
-      if (nextKey !== key) {
+      if (!monthView && nextKey !== key) {
         const section = document.createElement("section");
         const heading = document.createElement("h2");
         heading.textContent = day.toLocaleDateString(undefined, DAY_FORMAT);
@@ -223,8 +311,49 @@ export class IdlCalendar extends HTMLElement {
       item.append(time, summary);
       group.append(item);
     }
-    const remaining = Math.max(0, this._events.length - this._config.max_events);
+    const remaining = Math.max(0, events.length - this._config.max_events);
     root.querySelector("#overflow").textContent = remaining ? `+${remaining} more events` : "";
+  }
+
+  _renderMonth(start, end, selected, today) {
+    const grid = this.shadowRoot.querySelector("#month");
+    grid.replaceChildren();
+    for (let index = 0; index < 7; index++) {
+      const label = document.createElement("span");
+      label.className = "weekday";
+      label.textContent = new Date(2026, 0, 4 + (index + this._config.week_start) % 7)
+        .toLocaleDateString(undefined, { weekday: "short" });
+      grid.append(label);
+    }
+    const leading = (start.getDay() - this._config.week_start + 7) % 7;
+    const days = new Date(end.getFullYear(), end.getMonth(), 0).getDate();
+    const cells = Math.ceil((leading + days) / 7) * 7;
+    for (let index = 0; index < cells; index++) {
+      const dayNumber = index - leading + 1;
+      if (dayNumber < 1 || dayNumber > days) {
+        grid.append(document.createElement("span"));
+        continue;
+      }
+      const day = new Date(start.getFullYear(), start.getMonth(), dayNumber);
+      const count = eventsForDay(this._events, day).length;
+      const button = document.createElement("button");
+      button.className = "day";
+      button.textContent = String(dayNumber);
+      button.setAttribute("aria-pressed", String(dateKey(day) === dateKey(selected)));
+      button.setAttribute("aria-label", `${day.toLocaleDateString(undefined, DAY_FORMAT)}: ${count} events`);
+      if (dateKey(day) === dateKey(today)) button.setAttribute("aria-current", "date");
+      if (count) {
+        const marker = document.createElement("span");
+        marker.className = "count";
+        marker.textContent = `${count} •`;
+        button.append(marker);
+      }
+      button.addEventListener("click", () => {
+        this._selectedDay = day;
+        this._render();
+      });
+      grid.append(button);
+    }
   }
 }
 
