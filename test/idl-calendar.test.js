@@ -116,7 +116,7 @@ test("fetches only through authenticated GET API and renders untrusted text lite
   assert.match(calls[0][1], /^calendars\/calendar.work\?start=.*&end=/);
   assert.equal(card._events.length, 1);
   const main = card.shadowRoot.querySelector("main");
-  assert.equal(main.children[0].children[1].children[0].children[1].textContent, summary);
+  assert.equal(main.children[0].children[1].children[0].children[0].textContent, summary);
 });
 
 test("partial failures retain available calendars and display an error", async () => {
@@ -227,11 +227,11 @@ test("month grid includes every date, handles six weeks, and selects day events 
   const buttons = grid.children.filter(child => child.className === "day");
   assert.equal(grid.children.length, 7 + 42);
   assert.equal(buttons.length, 31);
-  assert.equal(buttons[30].children[0].textContent, "1 •");
+  assert.equal(buttons[30].children[0].textContent, "<b>Month end</b>");
   buttons[30].click();
   assert.equal(calls.length, 1);
   const main = card.shadowRoot.querySelector("main");
-  assert.equal(main.children[1].children[0].children[1].textContent, "<b>Month end</b>");
+  assert.equal(main.children[1].children[0].children[0].textContent, "<b>Month end</b>");
   assert.equal(card.shadowRoot.querySelector("#month").children
     .filter(child => child.attributes["aria-pressed"] === "true")[0].textContent, "31");
 });
@@ -304,4 +304,59 @@ test("day selection and refresh restore keyboard focus to the same date", async 
   card.shadowRoot.activeElement = button;
   await card._refresh();
   assert.equal(card.shadowRoot.querySelector(`[data-date="${date}"]`).focused, true);
+});
+
+test("month cells show names on every overlapping day and mark hidden names", async () => {
+  const summary = '<img src=x onerror="alert(1)">';
+  const card = makeCard(["calendar.work"], async () => [
+    { start: "2026-08-05", end: "2026-08-07", summary },
+    { start: "2026-08-05T09:00:00", end: "2026-08-05T10:00:00", summary: "Meeting" },
+  ], { view: "month", max_events: 1 });
+  card._month = new Date(2026, 7, 1);
+  await card._refresh();
+  const fifth = card.shadowRoot.querySelector('[data-date="2026-08-05"]');
+  const sixth = card.shadowRoot.querySelector('[data-date="2026-08-06"]');
+  const seventh = card.shadowRoot.querySelector('[data-date="2026-08-07"]');
+  assert.equal(fifth.children[0].className, "day-event");
+  assert.equal(fifth.children[0].textContent, summary);
+  assert.equal(fifth.children[0].getAttribute("title"), summary);
+  assert.equal(fifth.children[1].textContent, "+1 more");
+  assert.ok(fifth.getAttribute("aria-label").includes("Meeting"));
+  assert.equal(sixth.children[0].textContent, summary);
+  assert.equal(seventh.children.length, 0);
+});
+
+test("responsive and TRMNL cells limit previews and keep remaining names selectable", async () => {
+  for (const [mode, limit] of [["responsive", 3], ["trmnl", 1]]) {
+    const card = makeCard(["calendar.work"], async () =>
+      Array.from({ length: 5 }, (_, index) => ({
+        start: "2026-08-31", end: "2026-09-01", summary: `Event ${index}`,
+      })), { view: "month", display_mode: mode });
+    card._month = new Date(2026, 7, 1);
+    await card._refresh();
+    const button = card.shadowRoot.querySelector('[data-date="2026-08-31"]');
+    assert.equal(button.children.filter(child => child.className === "day-event").length, limit);
+    assert.equal(button.children[limit].textContent, `+${5 - limit} more`);
+    button.click();
+    assert.equal(card.shadowRoot.querySelector("main").children[1].children.length, 5);
+    assert.equal(card.shadowRoot.querySelector("#month").getAttribute("style"), "--weeks: 6");
+  }
+});
+
+test("agenda and selected-day lists show only event names, not hours or calendar labels", async () => {
+  for (const view of ["agenda", "month"]) {
+    const { start, end } = calendarRange(1);
+    const card = makeCard(["calendar.work", "calendar.family"], async (_, path) =>
+      path.includes("family") ? [] : [
+        { start: dateKey(start), end: dateKey(end), summary: "Holiday" },
+        { start: new Date(start.getTime() + 3600000).toISOString(),
+          end: new Date(start.getTime() + 7200000).toISOString(), summary: "Meeting" },
+      ], { view });
+    await card._refresh();
+    const main = card.shadowRoot.querySelector("main");
+    const list = view === "month" ? main.children[1] : main.children[0].children[1];
+    assert.deepEqual(list.children.map(item => item.children[0].textContent), ["Holiday", "Meeting"]);
+    assert.ok(list.children.every(item => item.children.length === 1
+      && item.children[0].children.length === 0));
+  }
 });

@@ -46,16 +46,22 @@ For manual installation, copy `idl-calendar.js` into `/config/www/` and register
 ## Month and day display
 
 Month view defaults to the current month and today's events. Every date is shown,
-including months spanning six calendar rows. Dates with events show an event
-count; selecting a date displays that day's events. **Previous month**, **Next
+including months spanning six calendar rows. Each date shows event names directly
+in its cell; selecting a date displays that day's event-name list. No hours,
+“All day”/“Ongoing” labels, or calendar names are displayed in either view.
+Events retain their chronological ordering. **Previous month**, **Next
 month**, and **Today** only change the displayed period, never the native calendar.
 The card reads the entire visible month, including past dates, through Home
 Assistant's authenticated calendar endpoint. No additional calendar integration
 is installed and no events are created, edited, or deleted.
 
 Multi-day and overnight events appear on every day they overlap; an event ending
-at midnight does not appear on the following day. Event counts include all events,
-even when the day list is limited by `max_events`. The day list shows a remaining
+at midnight does not appear on the following day. Responsive cells preview up to
+three names; the fixed TRMNL canvas previews one name per date to keep all six
+calendar rows visible. `max_events` also caps these previews. Long names are
+ellipsized, with full names available on hover and in the selected-day list.
+Cells show `+N more` when additional events are present, and accessible date
+labels include every event name. The day list shows a remaining
 event count when truncated. When following the current month, automatic refresh
 advances the month at a month boundary; a manually browsed month stays selected.
 
@@ -64,8 +70,7 @@ In agenda view events are grouped by start day and sorted chronologically. All-d
 their calendar date; timed events and the query window use the browser's local
 timezone. Set the rendering browser's timezone to the intended display timezone.
 Events that started before today and are still active appear under today.
-In agenda view multi-day events appear once, not once per day. Calendar names appear when multiple
-calendars are configured. Missing calendars show an error without hiding events
+In agenda view multi-day events appear once, not once per day. Missing calendars show an error without hiding events
 from calendars that are available; failed reads are retried at the next refresh.
 
 ## Low-resolution displays / TRMNL OG
@@ -74,7 +79,8 @@ Use `display_mode: trmnl` on a dedicated dashboard for the TRMNL OG's 800×480
 landscape resolution. The card uses solid black text and rules on white,
 high-contrast typography, and no event-editing controls. In month view the month
 grid and day events appear side by side; responsive mode stacks them on narrow
-screens. A static image shows the selected date (today by default); day selection
+screens. A static image shows event-name previews throughout the month and the
+selected date's list (today by default); day selection
 and month navigation work in the Home Assistant browser, not on the image.
 The fixed canvas clips
 content that does not fit; reduce `max_events`, shorten titles, or use a smaller

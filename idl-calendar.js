@@ -80,10 +80,8 @@ export class IdlCalendar extends HTMLElement {
         h1 { font-size: 26px; margin: 0; }
         h2 { font-size: 18px; margin: 16px 0 4px; border-bottom: 1px solid #000; }
         ul { list-style: none; margin: 0; padding: 0; }
-        li { display: grid; grid-template-columns: 105px minmax(0, 1fr);
-          gap: 12px; padding: 5px 0; break-inside: avoid; }
+        li { padding: 5px 0; break-inside: avoid; }
         .summary { font-weight: bold; overflow-wrap: anywhere; }
-        .calendar { display: block; font-size: 14px; font-weight: normal; }
         #status { margin: 12px 0 0; }
         #status:empty, #overflow:empty { display: none; }
         #overflow { margin: 12px 0 0; border-top: 1px solid #000; padding-top: 6px; }
@@ -92,22 +90,29 @@ export class IdlCalendar extends HTMLElement {
           border-radius: 0; cursor: pointer; }
         button:focus-visible { outline: 3px solid #000; outline-offset: 2px; }
         #navigation { display: flex; gap: 8px; margin: 10px 0; }
-        #content.month { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+        #content.month { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
           gap: 20px; }
         #month { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr));
           align-content: start; gap: 3px; }
         .weekday { text-align: center; font-size: 14px; padding: 4px 0; }
-        .day { min-height: 42px; padding: 2px; }
+        .day { min-width: 0; min-height: 72px; padding: 3px; text-align: left;
+          display: flex; flex-direction: column; align-items: stretch; }
+        .day-event { display: block; font-size: 12px; line-height: 1.2;
+          overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .day[aria-pressed="true"] { background: #000; color: #fff; }
         .day[aria-current="date"] { border: 3px solid #000; font-weight: bold; }
         .count { display: block; font-size: 12px; }
         #content.month h2 { margin-top: 0; }
-        #content.month li { grid-template-columns: 85px minmax(0, 1fr); gap: 8px; }
         :host([display-mode="trmnl"]) ha-card { width: 800px; height: 480px;
           overflow: hidden; }
+        :host([display-mode="trmnl"]) #month { height: 320px;
+          grid-template-rows: 26px repeat(var(--weeks), minmax(0, 1fr)); }
+        :host([display-mode="trmnl"]) .day { min-height: 0; overflow: hidden;
+          font-size: 14px; line-height: 1.1; }
+        :host([display-mode="trmnl"]) .day-event,
+        :host([display-mode="trmnl"]) .count { font-size: 11px; line-height: 1.1; }
         @media (max-width: 450px) {
           ha-card { padding: 12px; }
-          li { grid-template-columns: 85px minmax(0, 1fr); gap: 8px; }
           :host([display-mode="responsive"]) #content.month { grid-template-columns: minmax(0, 1fr); }
         }
       </style>
@@ -296,19 +301,10 @@ export class IdlCalendar extends HTMLElement {
         key = nextKey;
       }
       const item = document.createElement("li");
-      const time = document.createElement("span");
-      time.textContent = event.allDay ? "All day" : event.start < start ? "Ongoing"
-        : event.start.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
       const summary = document.createElement("span");
       summary.className = "summary";
       summary.textContent = event.summary;
-      if (this._config.entities.length > 1) {
-        const calendar = document.createElement("span");
-        calendar.className = "calendar";
-        calendar.textContent = event.calendar;
-        summary.append(calendar);
-      }
-      item.append(time, summary);
+      item.append(summary);
       group.append(item);
     }
     const remaining = Math.max(0, events.length - this._config.max_events);
@@ -329,6 +325,7 @@ export class IdlCalendar extends HTMLElement {
     const leading = (start.getDay() - this._config.week_start + 7) % 7;
     const days = new Date(end.getFullYear(), end.getMonth(), 0).getDate();
     const cells = Math.ceil((leading + days) / 7) * 7;
+    grid.setAttribute("style", `--weeks: ${cells / 7}`);
     for (let index = 0; index < cells; index++) {
       const dayNumber = index - leading + 1;
       if (dayNumber < 1 || dayNumber > days) {
@@ -336,18 +333,28 @@ export class IdlCalendar extends HTMLElement {
         continue;
       }
       const day = new Date(start.getFullYear(), start.getMonth(), dayNumber);
-      const count = eventsForDay(this._events, day).length;
+      const dayEvents = eventsForDay(this._events, day);
+      const previewLimit = Math.min(this._config.max_events,
+        this._config.display_mode === "trmnl" ? 1 : 3);
       const button = document.createElement("button");
       button.className = "day";
       button.textContent = String(dayNumber);
       button.setAttribute("data-date", dateKey(day));
       button.setAttribute("aria-pressed", String(dateKey(day) === dateKey(selected)));
-      button.setAttribute("aria-label", `${day.toLocaleDateString(undefined, DAY_FORMAT)}: ${count} events`);
+      button.setAttribute("aria-label", `${day.toLocaleDateString(undefined, DAY_FORMAT)}: ${dayEvents.length} events${dayEvents.length ? `, ${dayEvents.map(event => event.summary).join(", ")}` : ""}`);
       if (dateKey(day) === dateKey(today)) button.setAttribute("aria-current", "date");
-      if (count) {
+      for (const event of dayEvents.slice(0, previewLimit)) {
+        const name = document.createElement("span");
+        name.className = "day-event";
+        name.textContent = event.summary;
+        name.setAttribute("title", event.summary);
+        button.append(name);
+      }
+      const remaining = dayEvents.length - previewLimit;
+      if (remaining > 0) {
         const marker = document.createElement("span");
         marker.className = "count";
-        marker.textContent = `${count} •`;
+        marker.textContent = `+${remaining} more`;
         button.append(marker);
       }
       button.addEventListener("click", () => {
