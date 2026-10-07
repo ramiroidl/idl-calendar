@@ -59,6 +59,11 @@ export function sortEvents(events) {
     || a.summary.localeCompare(b.summary));
 }
 
+export function visibleEventCount(total, slots, maxEvents) {
+  const limit = Math.max(0, Math.min(slots, maxEvents));
+  return total <= limit ? total : Math.max(0, Math.min(slots - 1, maxEvents));
+}
+
 export class IdlCalendar extends HTMLElement {
   constructor() {
     super();
@@ -67,72 +72,37 @@ export class IdlCalendar extends HTMLElement {
     this._request = 0;
     this._loading = true;
     this._error = "";
+    this._dayLists = [];
+    this._resizeObserver = typeof ResizeObserver === "undefined" ? null
+      : new ResizeObserver(() => this._fitEvents());
     this.shadowRoot.innerHTML = `
       <style>
         :host { display: block; color: #000; background: #fff; }
         ha-card {
-          display: block; box-sizing: border-box; padding: 20px; background: #fff; color: #000;
+          display: block; box-sizing: border-box; padding: 8px; background: #fff; color: #000;
           border: 2px solid #000; border-radius: 0; box-shadow: none;
           font-family: Arial, sans-serif; font-size: 18px; line-height: 1.3;
         }
-        header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 20px;
-          justify-content: space-between; border-bottom: 3px solid #000; padding-bottom: 10px; }
-        h1 { font-size: 26px; margin: 0; }
-        h2 { font-size: 18px; margin: 16px 0 4px; border-bottom: 1px solid #000; }
-        ul { list-style: none; margin: 0; padding: 0; }
-        li { padding: 5px 0; break-inside: avoid; }
-        .summary { font-weight: bold; overflow-wrap: anywhere; }
-        #status { margin: 12px 0 0; }
-        #status:empty, #overflow:empty { display: none; }
-        #overflow { margin: 12px 0 0; border-top: 1px solid #000; padding-top: 6px; }
-        [hidden] { display: none !important; }
-        button { font: inherit; color: #000; background: #fff; border: 1px solid #000;
-          border-radius: 0; cursor: pointer; }
-        button:focus-visible { outline: 3px solid #000; outline-offset: 2px; }
-        #navigation { display: flex; gap: 8px; margin: 10px 0; }
-        #content.month { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
-          gap: 20px; }
+        #status { position: absolute; width: 1px; height: 1px; overflow: hidden;
+          clip-path: inset(50%); }
         #month { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr));
-          align-content: start; gap: 3px; }
-        .weekday { text-align: center; font-size: 14px; padding: 4px 0; }
-        .day { min-width: 0; min-height: 72px; padding: 3px; text-align: left;
-          display: flex; flex-direction: column; align-items: stretch; }
-        .day-event { display: block; font-size: 12px; line-height: 1.2;
+          height: 100%; grid-template-rows: 26px repeat(var(--weeks), minmax(0, 1fr));
+          gap: 3px; }
+        .weekday { text-align: center; font-size: 14px; line-height: 26px; }
+        .day { min-width: 0; min-height: 0; padding: 3px; border: 1px solid #000;
+          display: flex; flex-direction: column; overflow: hidden; }
+        .day-number { font-size: 16px; line-height: 20px; flex: none; }
+        .events { list-style: none; margin: 0; padding: 0; flex: 1; min-height: 0;
+          font-size: 12px; line-height: 16px; overflow: hidden; }
+        .day-event, .count { display: block; height: 16px;
           overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .day[aria-pressed="true"] { background: #000; color: #fff; }
-        .day[aria-current="date"] { border: 3px solid #000; font-weight: bold; }
-        .count { display: block; font-size: 12px; }
-        #content.month h2 { margin-top: 0; }
-        :host([display-mode="trmnl"]) ha-card { width: 800px; height: 480px;
-          overflow: hidden; }
-        :host([display-mode="trmnl"]) #month { height: 320px;
-          grid-template-rows: 26px repeat(var(--weeks), minmax(0, 1fr)); }
-        :host([display-mode="trmnl"]) .day { min-height: 0; overflow: hidden;
-          font-size: 14px; line-height: 1.1; }
-        :host([display-mode="trmnl"]) .day-event,
-        :host([display-mode="trmnl"]) .count { font-size: 11px; line-height: 1.1; }
-        @media (max-width: 450px) {
-          ha-card { padding: 12px; }
-          :host([display-mode="responsive"]) #content.month { grid-template-columns: minmax(0, 1fr); }
-        }
+        .day[aria-current="date"] .day-number { font-weight: bold; text-decoration: underline; }
+        :host([display-mode="trmnl"]) ha-card { width: 800px; }
       </style>
       <ha-card>
-        <header><h1></h1><span id="range"></span></header>
         <p id="status" role="status" aria-live="polite"></p>
-        <nav id="navigation" aria-label="Month navigation">
-          <button id="previous" aria-label="Previous month">‹</button>
-          <button id="today">Today</button>
-          <button id="next" aria-label="Next month">›</button>
-        </nav>
-        <div id="content">
-          <div id="month" aria-label="Month days"></div>
-          <main aria-label="Calendar events" aria-live="polite"></main>
-        </div>
-        <p id="overflow"></p>
+        <div id="month" role="group" aria-label="Month days"></div>
       </ha-card>`;
-    this.shadowRoot.querySelector("#previous").addEventListener("click", () => this._changeMonth(-1));
-    this.shadowRoot.querySelector("#next").addEventListener("click", () => this._changeMonth(1));
-    this.shadowRoot.querySelector("#today").addEventListener("click", () => this._changeMonth(0));
   }
 
   setConfig(config) {
@@ -141,34 +111,35 @@ export class IdlCalendar extends HTMLElement {
           || !/^calendar\.[a-z0-9_]+$/.test(entity))) {
       throw new Error("IDL Calendar requires a non-empty entities list of calendar.* entities.");
     }
-    const days = config.days ?? 7;
     const maxEvents = config.max_events ?? 8;
     const refresh = config.refresh_interval ?? 300;
     const display = config.display_mode ?? "responsive";
-    const view = config.view ?? "month";
+    const height = config.height ?? 480;
+    const month = config.month == null ? null : eventDate(`${config.month}-01`);
     const weekStart = config.week_start ?? 1;
-    if (!Number.isInteger(days) || days < 1 || days > 14
-        || !Number.isInteger(maxEvents) || maxEvents < 1 || maxEvents > 50
+    if (!Number.isInteger(maxEvents) || maxEvents < 1 || maxEvents > 50
         || !Number.isInteger(refresh) || refresh < 60 || refresh > 86400) {
-      throw new Error("days must be 1–14, max_events 1–50, and refresh_interval 60–86400 seconds.");
+      throw new Error("max_events must be 1–50 and refresh_interval 60–86400 seconds.");
     }
     if (!["responsive", "trmnl"].includes(display)) {
       throw new Error("display_mode must be responsive or trmnl.");
     }
-    if (!["month", "agenda"].includes(view) || ![0, 1].includes(weekStart)) {
-      throw new Error("view must be month or agenda; week_start must be 0 (Sunday) or 1 (Monday).");
+    if (![0, 1].includes(weekStart) || !Number.isInteger(height) || height < 360 || height > 2160
+        || (config.month != null && (typeof config.month !== "string"
+          || !/^\d{4}-\d{2}$/.test(config.month) || !month))) {
+      throw new Error("week_start must be 0 or 1, height 360–2160, and month YYYY-MM.");
     }
     this._config = { ...config, entities: [...new Set(config.entities)],
-      days, max_events: maxEvents, refresh_interval: refresh, display_mode: display,
-      view, week_start: weekStart };
-    this._month = null;
-    this._selectedDay = null;
+      max_events: maxEvents, refresh_interval: refresh, display_mode: display,
+      height: display === "trmnl" ? 480 : height, week_start: weekStart };
+    this._month = month;
     this._request++;
     this._events = [];
     this._error = "";
     this._loading = true;
     this._lastFetch = 0;
     this.setAttribute("display-mode", display);
+    this.shadowRoot.querySelector("ha-card").setAttribute("style", `height: ${this._config.height}px`);
     this._render();
     this._startTimer();
     if (this._hass && this.isConnected) void this._refresh();
@@ -180,18 +151,21 @@ export class IdlCalendar extends HTMLElement {
   }
 
   connectedCallback() {
+    this._resizeObserver?.observe(this.shadowRoot.querySelector("#month"));
+    this._fitEvents();
     this._startTimer();
     if (this._hass && this._config) void this._refresh();
   }
 
   disconnectedCallback() {
+    this._resizeObserver?.disconnect();
     clearInterval(this._timer);
     this._request++;
     this._lastFetch = 0;
   }
 
   getCardSize() {
-    return this._config?.display_mode === "trmnl" || this._config?.view === "month" ? 9 : 5;
+    return Math.ceil((this._config?.height ?? 480) / 50);
   }
 
   static getStubConfig(hass) {
@@ -206,20 +180,7 @@ export class IdlCalendar extends HTMLElement {
   }
 
   _range() {
-    return this._config.view === "month" ? monthRange(this._month ?? new Date())
-      : calendarRange(this._config.days);
-  }
-
-  _changeMonth(offset) {
-    const { start } = this._range();
-    this._month = offset === 0 ? null
-      : new Date(start.getFullYear(), start.getMonth() + offset, 1);
-    this._selectedDay = this._month;
-    this._events = [];
-    this._error = "";
-    this._loading = true;
-    this._render();
-    void this._refresh();
+    return monthRange(this._month ?? new Date());
   }
 
   async _refresh() {
@@ -253,68 +214,18 @@ export class IdlCalendar extends HTMLElement {
   _render() {
     if (!this._config) return;
     const root = this.shadowRoot;
-    let { start, end } = this._range();
-    const monthView = this._config.view === "month";
-    const lastDay = new Date(end);
-    lastDay.setDate(lastDay.getDate() - 1);
-    root.querySelector("h1").textContent = this._config.title ?? "Calendar";
-    root.querySelector("#range").textContent = monthView
-      ? start.toLocaleDateString(undefined, { month: "long", year: "numeric" })
-      : `${start.toLocaleDateString(undefined, DAY_FORMAT)} – ${lastDay.toLocaleDateString(undefined, DAY_FORMAT)}`;
+    const { start, end } = this._range();
     root.querySelector("#status").textContent = this._loading ? "Loading calendar…"
-      : this._error || (!monthView && !this._events.length ? "No upcoming events." : "");
-    root.querySelector("#navigation").hidden = !monthView;
-    root.querySelector("#month").hidden = !monthView;
-    root.querySelector("#content").className = monthView ? "month" : "";
-    const main = root.querySelector("main");
-    main.replaceChildren();
-    let group;
-    let key;
-    let events = this._events;
-    if (monthView) {
-      const today = new Date();
-      const selected = this._selectedDay >= start && this._selectedDay < end
-        ? this._selectedDay : (today >= start && today < end ? today : start);
-      this._renderMonth(start, end, selected, today);
-      start = calendarRange(1, selected).start;
-      events = eventsForDay(this._events, selected);
-      const heading = document.createElement("h2");
-      heading.textContent = selected.toLocaleDateString(undefined, DAY_FORMAT);
-      group = document.createElement("ul");
-      main.append(heading, group);
-      if (!this._loading && !events.length) {
-        const empty = document.createElement("p");
-        empty.textContent = this._error ? "Day events unavailable or incomplete." : "No events this day.";
-        main.append(empty);
-      }
-    }
-    for (const event of events.slice(0, this._config.max_events)) {
-      const day = event.start < start ? start : event.start;
-      const nextKey = dateKey(day);
-      if (!monthView && nextKey !== key) {
-        const section = document.createElement("section");
-        const heading = document.createElement("h2");
-        heading.textContent = day.toLocaleDateString(undefined, DAY_FORMAT);
-        group = document.createElement("ul");
-        section.append(heading, group);
-        main.append(section);
-        key = nextKey;
-      }
-      const item = document.createElement("li");
-      const summary = document.createElement("span");
-      summary.className = "summary";
-      summary.textContent = event.summary;
-      item.append(summary);
-      group.append(item);
-    }
-    const remaining = Math.max(0, events.length - this._config.max_events);
-    root.querySelector("#overflow").textContent = remaining ? `+${remaining} more events` : "";
+      : this._error || (this._events.length ? "" : "No events this month.");
+    root.querySelector("#month").setAttribute("aria-label",
+      start.toLocaleDateString(undefined, { month: "long", year: "numeric" }));
+    this._renderMonth(start, end, new Date());
   }
 
-  _renderMonth(start, end, selected, today) {
+  _renderMonth(start, end, today) {
     const grid = this.shadowRoot.querySelector("#month");
-    const focusedDate = this.shadowRoot.activeElement?.getAttribute("data-date");
     grid.replaceChildren();
+    this._dayLists = [];
     for (let index = 0; index < 7; index++) {
       const label = document.createElement("span");
       label.className = "weekday";
@@ -334,37 +245,41 @@ export class IdlCalendar extends HTMLElement {
       }
       const day = new Date(start.getFullYear(), start.getMonth(), dayNumber);
       const dayEvents = eventsForDay(this._events, day);
-      const previewLimit = Math.min(this._config.max_events,
-        this._config.display_mode === "trmnl" ? 1 : 3);
-      const button = document.createElement("button");
-      button.className = "day";
-      button.textContent = String(dayNumber);
-      button.setAttribute("data-date", dateKey(day));
-      button.setAttribute("aria-pressed", String(dateKey(day) === dateKey(selected)));
-      button.setAttribute("aria-label", `${day.toLocaleDateString(undefined, DAY_FORMAT)}: ${dayEvents.length} events${dayEvents.length ? `, ${dayEvents.map(event => event.summary).join(", ")}` : ""}`);
-      if (dateKey(day) === dateKey(today)) button.setAttribute("aria-current", "date");
-      for (const event of dayEvents.slice(0, previewLimit)) {
-        const name = document.createElement("span");
+      const cell = document.createElement("section");
+      cell.className = "day";
+      cell.setAttribute("data-date", dateKey(day));
+      cell.setAttribute("aria-label", `${day.toLocaleDateString(undefined, DAY_FORMAT)}: ${dayEvents.length} events${dayEvents.length ? `, ${dayEvents.map(event => event.summary).join(", ")}` : ""}`);
+      if (dateKey(day) === dateKey(today)) cell.setAttribute("aria-current", "date");
+      const number = document.createElement("span");
+      number.className = "day-number";
+      number.textContent = String(dayNumber);
+      const list = document.createElement("ul");
+      list.className = "events";
+      cell.append(number, list);
+      this._dayLists.push({ list, events: dayEvents });
+      grid.append(cell);
+    }
+    this._fitEvents();
+  }
+
+  _fitEvents() {
+    for (const { list, events } of this._dayLists) {
+      const slots = Math.floor(list.clientHeight / 16);
+      const visible = visibleEventCount(events.length, slots, this._config.max_events);
+      list.replaceChildren();
+      for (const event of events.slice(0, visible)) {
+        const name = document.createElement("li");
         name.className = "day-event";
         name.textContent = event.summary;
-        name.setAttribute("title", event.summary);
-        button.append(name);
+        list.append(name);
       }
-      const remaining = dayEvents.length - previewLimit;
+      const remaining = events.length - visible;
       if (remaining > 0) {
-        const marker = document.createElement("span");
+        const marker = document.createElement("li");
         marker.className = "count";
-        marker.textContent = `+${remaining} more`;
-        button.append(marker);
+        marker.textContent = `+${remaining}`;
+        list.append(marker);
       }
-      button.addEventListener("click", () => {
-        this._selectedDay = day;
-        this._render();
-      });
-      grid.append(button);
-    }
-    if (focusedDate) {
-      this.shadowRoot.querySelector(`[data-date="${focusedDate}"]`)?.focus();
     }
   }
 }

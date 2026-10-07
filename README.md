@@ -2,9 +2,15 @@
 
 A dependency-free, read-only Home Assistant dashboard card, installable through
 HACS. It is only a display UI for native Home Assistant `calendar.*` entities,
-not a calendar provider or event store. It shows a whole month and the selected
-day's events (or an optional agenda) using a minimal
-black-and-white design: no animations, images, event editing, or service calls.
+not a calendar provider or event store. It shows only a static whole-month grid:
+weekday headings, day numbers, and event names. There are no buttons, date
+selection, navigation, agenda, or event-editing controls. All options are set
+through the card configuration.
+
+![Static 800×480 calendar with weekday headings, event names, and +n overflow](docs/calendar-preview.png)
+
+Preview uses fictional events for August 2026, including a busy day with `+7`
+hidden events. It is captured from the actual card in TRMNL mode.
 
 ## Installation
 
@@ -19,11 +25,10 @@ black-and-white design: no animations, images, event editing, or service calls.
 
 ```yaml
 type: custom:idl-calendar
-title: Calendar
 entities:
   - calendar.family
   - calendar.work
-view: month
+display_mode: trmnl
 max_events: 8
 ```
 
@@ -35,56 +40,53 @@ For manual installation, copy `idl-calendar.js` into `/config/www/` and register
 | Option | Default | Description |
 | --- | --- | --- |
 | `entities` | Required | Non-empty list of Home Assistant calendar entity IDs. |
-| `title` | `Calendar` | Heading text. |
-| `view` | `month` | `month` for the whole month plus day events; `agenda` for the upcoming agenda. |
-| `week_start` | `1` | First weekday in month view: `1` for Monday or `0` for Sunday. |
-| `days` | `7` | Agenda-only calendar days to show, including today; integer from 1 to 14. |
-| `max_events` | `8` | Maximum entries in the selected day or agenda; integer from 1 to 50. |
+| `month` | Current month | Optional fixed month as a quoted `YYYY-MM` string, e.g. `"2026-08"`. Omit to follow the current month automatically. |
+| `week_start` | `1` | First weekday: `1` for Monday or `0` for Sunday. |
+| `max_events` | `8` | Maximum event names per cell; integer from 1 to 50. Available space may lower this limit. |
 | `refresh_interval` | `300` | Refresh interval in seconds; integer from 60 to 86400. |
 | `display_mode` | `responsive` | `responsive` for dashboards, `trmnl` for a fixed 800×480 canvas. |
+| `height` | `480` | Responsive grid height in pixels; integer from 360 to 2160. TRMNL mode always uses 480. |
 
-## Month and day display
+## Static calendar display
 
-Month view defaults to the current month and today's events. Every date is shown,
-including months spanning six calendar rows. Each date shows event names directly
-in its cell; selecting a date displays that day's event-name list. No hours,
-“All day”/“Ongoing” labels, or calendar names are displayed in either view.
-Events retain their chronological ordering. **Previous month**, **Next
-month**, and **Today** only change the displayed period, never the native calendar.
-The card reads the entire visible month, including past dates, through Home
-Assistant's authenticated calendar endpoint. No additional calendar integration
-is installed and no events are created, edited, or deleted.
+Every date is shown, including months spanning six calendar rows. Weekday names
+appear across the top; each non-interactive date cell contains its day number
+and a list of event names. There is no visible title, month toolbar, or secondary
+event panel. The month/year remains available as an accessible label.
+No hours, “All day”/“Ongoing” labels, or calendar names are displayed.
+The current day number is bold and underlined.
 
 Multi-day and overnight events appear on every day they overlap; an event ending
-at midnight does not appear on the following day. Responsive cells preview up to
-three names; the fixed TRMNL canvas previews one name per date to keep all six
-calendar rows visible. `max_events` also caps these previews. Long names are
-ellipsized, with full names available on hover and in the selected-day list.
-Cells show `+N more` when additional events are present, and accessible date
-labels include every event name. The day list shows a remaining
-event count when truncated. When following the current month, automatic refresh
-advances the month at a month boundary; a manually browsed month stays selected.
+at midnight does not appear on the following day. Events retain chronological
+ordering. Each name occupies one line; long names are ellipsized rather than
+wrapping. The card measures the available cell height and shows as many names as
+fit, up to `max_events`. If events remain, it reserves the last line for `+n`,
+where `n` is the number of hidden events. Layout resizing recalculates capacity.
+Accessible date labels include all names, including those omitted visually.
 
-For the original upcoming agenda, set `view: agenda` and optionally `days: 7`.
-In agenda view events are grouped by start day and sorted chronologically. All-day dates retain
-their calendar date; timed events and the query window use the browser's local
-timezone. Set the rendering browser's timezone to the intended display timezone.
-Events that started before today and are still active appear under today.
-In agenda view multi-day events appear once, not once per day. Missing calendars show an error without hiding events
-from calendars that are available; failed reads are retried at the next refresh.
+The entire configured month is read through Home Assistant's authenticated
+calendar endpoint. All-day dates retain their calendar date; timed events and
+the query window use the browser's local timezone. Set the rendering browser's
+timezone to the intended display timezone. With `month` omitted, refresh follows
+the current month at month boundaries. A configured month remains fixed.
+Missing calendars do not hide events from available calendars and are retried
+on refresh. Loading, empty, and error statuses are available to assistive
+technology without adding visual panels to the calendar.
+
+**Configuration migration:** `title`, `view`, and `days` from earlier versions
+no longer affect the display. Agenda and selected-day views have been removed;
+the card always renders the month grid. Set `month` to change the displayed
+period and `height`/`max_events` to control density.
 
 ## Low-resolution displays / TRMNL OG
 
 Use `display_mode: trmnl` on a dedicated dashboard for the TRMNL OG's 800×480
 landscape resolution. The card uses solid black text and rules on white,
-high-contrast typography, and no event-editing controls. In month view the month
-grid and day events appear side by side; responsive mode stacks them on narrow
-screens. A static image shows event-name previews throughout the month and the
-selected date's list (today by default); day selection
-and month navigation work in the Home Assistant browser, not on the image.
-The fixed canvas clips
-content that does not fit; reduce `max_events`, shorten titles, or use a smaller
-`days` window in agenda view for busy calendars.
+high-contrast typography, and no interactive controls. The month grid occupies
+the entire canvas and automatically fits four, five, or six calendar rows.
+Responsive mode scales the same seven-column grid to the dashboard width,
+using the configured height. Hidden events are represented by `+n`, not a
+touch action or another view.
 
 **This is a Home Assistant frontend card, not a native TRMNL plugin or a device
 transport.** A TRMNL OG cannot execute a Lovelace JavaScript card directly.
