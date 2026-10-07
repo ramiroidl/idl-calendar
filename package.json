@@ -1,0 +1,16 @@
+{
+  "name": "idl-calendar",
+  "version": "1.0.0",
+  "description": "A minimal, read-only Home Assistant calendar card for monochrome displays",
+  "type": "module",
+  "main": "idl-calendar.js",
+  "scripts": {
+    "test": "node --test"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ramiroidl/idl-calendar.git"
+  },
+  "keywords": [],
+  "private": true
+}
