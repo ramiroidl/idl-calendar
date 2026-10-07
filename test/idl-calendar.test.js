@@ -11,8 +11,10 @@ class Element {
   append(...children) { this.children.push(...children); }
   replaceChildren(...children) { this.children = children; }
   setAttribute(name, value) { this.attributes[name] = value; }
+  getAttribute(name) { return this.attributes[name]; }
   addEventListener(name, listener) { this.listeners[name] = listener; }
   click() { this.listeners.click?.(); }
+  focus() { this.focused = true; }
 }
 
 globalThis.HTMLElement = class {
@@ -20,6 +22,10 @@ globalThis.HTMLElement = class {
     const elements = new Map();
     this.shadowRoot = {
       querySelector(selector) {
+        if (selector.startsWith("[data-date=")) {
+          const date = selector.match(/"([^"]+)"/)[1];
+          return elements.get("#month")?.children.find(child => child.attributes["data-date"] === date);
+        }
         if (!elements.has(selector)) elements.set(selector, new Element());
         return elements.get(selector);
       },
@@ -283,4 +289,19 @@ test("month navigation ignores stale responses from the previous month", async (
   resolveOld([todayEvent("Old month")]);
   await pending;
   assert.deepEqual(card._events, []);
+});
+
+test("day selection and refresh restore keyboard focus to the same date", async () => {
+  const card = makeCard(["calendar.work"], async () => [], { view: "month" });
+  await card._refresh();
+  let button = card.shadowRoot.querySelector("#month").children
+    .find(child => child.className === "day");
+  const date = button.getAttribute("data-date");
+  card.shadowRoot.activeElement = button;
+  button.click();
+  button = card.shadowRoot.querySelector(`[data-date="${date}"]`);
+  assert.equal(button.focused, true);
+  card.shadowRoot.activeElement = button;
+  await card._refresh();
+  assert.equal(card.shadowRoot.querySelector(`[data-date="${date}"]`).focused, true);
 });

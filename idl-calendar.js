@@ -317,6 +317,7 @@ export class IdlCalendar extends HTMLElement {
 
   _renderMonth(start, end, selected, today) {
     const grid = this.shadowRoot.querySelector("#month");
+    const focusedDate = this.shadowRoot.activeElement?.getAttribute("data-date");
     grid.replaceChildren();
     for (let index = 0; index < 7; index++) {
       const label = document.createElement("span");
@@ -339,6 +340,7 @@ export class IdlCalendar extends HTMLElement {
       const button = document.createElement("button");
       button.className = "day";
       button.textContent = String(dayNumber);
+      button.setAttribute("data-date", dateKey(day));
       button.setAttribute("aria-pressed", String(dateKey(day) === dateKey(selected)));
       button.setAttribute("aria-label", `${day.toLocaleDateString(undefined, DAY_FORMAT)}: ${count} events`);
       if (dateKey(day) === dateKey(today)) button.setAttribute("aria-current", "date");
@@ -353,6 +355,9 @@ export class IdlCalendar extends HTMLElement {
         this._render();
       });
       grid.append(button);
+    }
+    if (focusedDate) {
+      this.shadowRoot.querySelector(`[data-date="${focusedDate}"]`)?.focus();
     }
   }
 }
