@@ -217,9 +217,15 @@ test("static grid includes weekday headings and every date in a six-week month",
   ], { month: "2026-08" });
   await card._refresh();
   const grid = card.shadowRoot.querySelector("#month");
-  assert.equal(grid.children.length, 7 + 42);
-  assert.equal(grid.children.filter(child => child.className === "day").length, 31);
-  assert.ok(grid.children.slice(0, 7).every(child => child.className === "weekday"));
+  assert.equal(grid.children.length, 1 + 7 + 42);
+  assert.equal(grid.children[0].className, "month-name");
+  assert.equal(grid.children[0].textContent,
+    new Date(2026, 7, 1).toLocaleDateString(undefined, { month: "short" }));
+  assert.equal(grid.children.filter(child => child.className.split(" ").includes("day")).length, 31);
+  assert.ok(grid.children.slice(1, 8).every(child => child.className === "weekday"));
+  const rows = grid.children.slice(8);
+  assert.ok(rows.every((child, index) =>
+    child.className.split(" ").includes("row-start") === (index % 7 === 0)));
   const last = card.shadowRoot.querySelector('[data-date="2026-08-31"]');
   assert.equal(last.children[0].textContent, "31");
   assert.equal(last.children[1].children[0].textContent, "<b>Month end</b>");
@@ -235,9 +241,12 @@ test("Sunday-first four-week grid and empty dates preserve numbers", async () =>
   const card = makeCard(["calendar.work"], async () => [], { month: "2026-02", week_start: 0 });
   await card._refresh();
   const grid = card.shadowRoot.querySelector("#month");
-  assert.equal(grid.children.length, 7 + 28);
-  assert.equal(grid.children[7].children[0].textContent, "1");
-  assert.equal(grid.children[7].children[1].children.length, 0);
+  assert.equal(grid.children.length, 1 + 7 + 28);
+  assert.equal(grid.children[1].textContent,
+    new Date(2026, 0, 4).toLocaleDateString(undefined, { weekday: "short" }));
+  assert.equal(grid.children[8].className, "day row-start");
+  assert.equal(grid.children[8].children[0].textContent, "1");
+  assert.equal(grid.children[8].children[1].children.length, 0);
 });
 
 test("cell capacity reserves an overflow line only when needed", () => {

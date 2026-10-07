@@ -85,10 +85,12 @@ export class IdlCalendar extends HTMLElement {
         }
         #status { position: absolute; width: 1px; height: 1px; overflow: hidden;
           clip-path: inset(50%); }
-        #month { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr));
+        #month { display: grid; grid-template-columns: auto repeat(7, minmax(0, 1fr));
           height: 100%; grid-template-rows: 26px repeat(var(--weeks), minmax(0, 1fr));
           gap: 3px; }
         .weekday { text-align: center; font-size: 14px; line-height: 26px; }
+        .month-name { font-size: 14px; font-weight: bold; line-height: 26px; padding-right: 4px; }
+        .row-start { grid-column-start: 2; }
         .day { min-width: 0; min-height: 0; padding: 3px; border: 1px solid #000;
           display: flex; flex-direction: column; overflow: hidden; }
         .day-number { font-size: 16px; line-height: 20px; flex: none; }
@@ -226,6 +228,10 @@ export class IdlCalendar extends HTMLElement {
     const grid = this.shadowRoot.querySelector("#month");
     grid.replaceChildren();
     this._dayLists = [];
+    const monthName = document.createElement("span");
+    monthName.className = "month-name";
+    monthName.textContent = start.toLocaleDateString(undefined, { month: "short" });
+    grid.append(monthName);
     for (let index = 0; index < 7; index++) {
       const label = document.createElement("span");
       label.className = "weekday";
@@ -239,14 +245,17 @@ export class IdlCalendar extends HTMLElement {
     grid.setAttribute("style", `--weeks: ${cells / 7}`);
     for (let index = 0; index < cells; index++) {
       const dayNumber = index - leading + 1;
+      const rowStart = index % 7 === 0 ? " row-start" : "";
       if (dayNumber < 1 || dayNumber > days) {
-        grid.append(document.createElement("span"));
+        const blank = document.createElement("span");
+        blank.className = rowStart.trim();
+        grid.append(blank);
         continue;
       }
       const day = new Date(start.getFullYear(), start.getMonth(), dayNumber);
       const dayEvents = eventsForDay(this._events, day);
       const cell = document.createElement("section");
-      cell.className = "day";
+      cell.className = `day${rowStart}`;
       cell.setAttribute("data-date", dateKey(day));
       cell.setAttribute("aria-label", `${day.toLocaleDateString(undefined, DAY_FORMAT)}: ${dayEvents.length} events${dayEvents.length ? `, ${dayEvents.map(event => event.summary).join(", ")}` : ""}`);
       if (dateKey(day) === dateKey(today)) cell.setAttribute("aria-current", "date");

@@ -3,11 +3,11 @@
 A dependency-free, read-only Home Assistant dashboard card, installable through
 HACS. It is only a display UI for native Home Assistant `calendar.*` entities,
 not a calendar provider or event store. It shows only a static whole-month grid:
-weekday headings, day numbers, and event names. There are no buttons, date
+the abbreviated month name, weekday headings, day numbers, and event names. There are no buttons, date
 selection, navigation, agenda, or event-editing controls. All options are set
 through the card configuration.
 
-![Static 800×480 calendar with weekday headings, event names, and +n overflow](docs/calendar-preview.png)
+![Static 800×480 calendar with month name, weekday headings, event names, and +n overflow](docs/calendar-preview.png)
 
 Preview uses fictional events for August 2026, including a busy day with `+7`
 hidden events. It is captured from the actual card in TRMNL mode.
@@ -50,9 +50,11 @@ For manual installation, copy `idl-calendar.js` into `/config/www/` and register
 ## Static calendar display
 
 Every date is shown, including months spanning six calendar rows. Weekday names
-appear across the top; each non-interactive date cell contains its day number
-and a list of event names. There is no visible title, month toolbar, or secondary
-event panel. The month/year remains available as an accessible label.
+appear across the top, preceded in the top-left corner by the abbreviated month
+name (e.g. `Aug`, localized by the browser) in a narrow column before the first
+weekday. Each non-interactive date cell contains its day number and a list of
+event names. There is no month toolbar or secondary event panel. The full
+month/year remains available as an accessible label.
 No hours, “All day”/“Ongoing” labels, or calendar names are displayed.
 The current day number is bold and underlined.
 
