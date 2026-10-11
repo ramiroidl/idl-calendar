@@ -83,7 +83,8 @@ test("configuration validates entities, bounds and configured month", () => {
   for (const config of [{}, { entities: [] }, { entities: ["sensor.test"] },
     ...[{ max_events: 0 }, { max_events: 51 }, { refresh_interval: 1 },
       { display_mode: "invalid" }, { week_start: 2 }, { height: 359 }, { height: 2161 },
-      { month: "2026-13" }, { month: "2026-02-01" }, { month: 2026 }]
+      { month: "2026-13" }, { month: "2026-02-01" }, { month: 2026 },
+      { cross_out_past_days: "no" }]
       .map(options => ({ entities: ["calendar.test"], ...options }))]) {
     assert.throws(() => card.setConfig(config));
   }
@@ -93,6 +94,9 @@ test("configuration validates entities, bounds and configured month", () => {
   assert.equal(card._config.height, 600);
   card.setConfig({ entities: ["calendar.test"], display_mode: "trmnl", height: 600 });
   assert.equal(card._config.height, 480);
+  assert.equal(card._config.cross_out_past_days, true);
+  card.setConfig({ entities: ["calendar.test"], cross_out_past_days: false });
+  assert.equal(card._config.cross_out_past_days, false);
 });
 
 function makeCard(entities, callApi, config = {}) {
@@ -244,9 +248,26 @@ test("Sunday-first four-week grid and empty dates preserve numbers", async () =>
   assert.equal(grid.children.length, 1 + 7 + 28);
   assert.equal(grid.children[1].textContent,
     new Date(2026, 0, 4).toLocaleDateString(undefined, { weekday: "short" }));
-  assert.equal(grid.children[8].className, "day row-start");
+  assert.ok(grid.children[8].className.split(" ").includes("row-start"));
   assert.equal(grid.children[8].children[0].textContent, "1");
   assert.equal(grid.children[8].children[1].children.length, 0);
+});
+
+test("past days are crossed out by default and can be disabled", async () => {
+  const card = makeCard(["calendar.work"], async () => [], { month: "2026-08" });
+  const start = new Date(2026, 7, 1);
+  const end = new Date(2026, 8, 1);
+  const today = new Date(2026, 7, 15);
+  card._renderMonth(start, end, today);
+  const classFor = date => card.shadowRoot.querySelector(`[data-date="${date}"]`).className;
+  assert.ok(classFor("2026-08-14").split(" ").includes("past"));
+  assert.ok(!classFor("2026-08-15").split(" ").includes("past"));
+  assert.ok(!classFor("2026-08-16").split(" ").includes("past"));
+
+  card.setConfig({ entities: ["calendar.work"], month: "2026-08", cross_out_past_days: false });
+  card._renderMonth(start, end, today);
+  assert.ok(!classFor("2026-08-14").split(" ").includes("past"));
+  card.disconnectedCallback();
 });
 
 test("cell capacity reserves an overflow line only when needed", () => {

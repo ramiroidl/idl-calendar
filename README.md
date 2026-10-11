@@ -43,6 +43,7 @@ For manual installation, copy `idl-calendar.js` into `/config/www/` and register
 | `entities` | Required | Non-empty list of Home Assistant calendar entity IDs. |
 | `month` | Current month | Optional fixed month as a quoted `YYYY-MM` string, e.g. `"2026-08"`. Omit to follow the current month automatically. |
 | `week_start` | `1` | First weekday: `1` for Monday or `0` for Sunday. |
+| `cross_out_past_days` | `true` | Draw a large X across each day before today. Set to `false` to disable. |
 | `max_events` | `8` | Maximum event names per cell; integer from 1 to 50. Available space may lower this limit. |
 | `refresh_interval` | `300` | Refresh interval in seconds; integer from 60 to 86400. |
 | `display_mode` | `responsive` | `responsive` for dashboards, `trmnl` for a fixed 800×480 canvas. |
