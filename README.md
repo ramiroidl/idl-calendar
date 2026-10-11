@@ -10,7 +10,8 @@ through the card configuration.
 ![Static 800×480 calendar with month name, weekday headings, event names, and +n overflow](docs/calendar-preview.png)
 
 Preview uses fictional events for August 2026, including a busy day with `+7`
-hidden events. It is captured from the actual card in TRMNL mode.
+hidden events. The current day is visually emphasized with a bold, underlined
+number, matching the live card behavior in TRMNL mode.
 
 ## Installation
 
@@ -56,7 +57,8 @@ weekday. Each non-interactive date cell contains its day number and a list of
 event names. There is no month toolbar or secondary event panel. The full
 month/year remains available as an accessible label.
 No hours, “All day”/“Ongoing” labels, or calendar names are displayed.
-The current day number is bold and underlined.
+The current day cell uses a light gray background and a bold day number so it
+remains visible from a distance without adding extra decoration.
 
 Multi-day and overnight events appear on every day they overlap; an event ending
 at midnight does not appear on the following day. Events retain chronological

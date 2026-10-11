@@ -98,7 +98,12 @@ export class IdlCalendar extends HTMLElement {
           font-size: 12px; line-height: 16px; overflow: hidden; }
         .day-event, .count { display: block; height: 16px;
           overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .day[aria-current="date"] .day-number { font-weight: bold; text-decoration: underline; }
+        .day[aria-current="date"] {
+          background: #e7e7e7;
+        }
+        .day[aria-current="date"] .day-number {
+          font-weight: bold;
+        }
         :host([display-mode="trmnl"]) ha-card { width: 800px; }
       </style>
       <ha-card>
