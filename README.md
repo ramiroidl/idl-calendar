@@ -10,7 +10,8 @@ through the card configuration.
 ![Static 800×480 calendar with month name, weekday headings, event names, and +n overflow](docs/calendar-preview.png)
 
 Preview uses fictional events for August 2026, including a busy day with `+7`
-hidden events. It is captured from the actual card in TRMNL mode.
+hidden events. The current day is visually emphasized with a bold, underlined
+number, matching the live card behavior in TRMNL mode.
 
 ## Installation
 
