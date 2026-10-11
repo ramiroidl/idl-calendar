@@ -57,8 +57,8 @@ weekday. Each non-interactive date cell contains its day number and a list of
 event names. There is no month toolbar or secondary event panel. The full
 month/year remains available as an accessible label.
 No hours, “All day”/“Ongoing” labels, or calendar names are displayed.
-The current day cell uses a light gray background with the day number bold and
-underlined so it remains visible from a distance.
+The current day cell uses a light gray background and a bold day number so it
+remains visible from a distance without adding extra decoration.
 
 Multi-day and overnight events appear on every day they overlap; an event ending
 at midnight does not appear on the following day. Events retain chronological

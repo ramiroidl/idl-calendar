@@ -103,7 +103,6 @@ export class IdlCalendar extends HTMLElement {
         }
         .day[aria-current="date"] .day-number {
           font-weight: bold;
-          text-decoration: underline;
         }
         :host([display-mode="trmnl"]) ha-card { width: 800px; }
       </style>
