@@ -7,11 +7,11 @@ the abbreviated month name, weekday headings, day numbers, and event names. Ther
 selection, navigation, agenda, or event-editing controls. All options are set
 through the card configuration.
 
-![Static 800×480 calendar with month name, weekday headings, event names, and +n overflow](docs/calendar-preview.png)
+![Static 800×480 calendar with past days crossed out, current day highlighted, event names, and +n overflow](docs/calendar-preview.png)
 
-Preview uses fictional events for August 2026, including a busy day with `+7`
-hidden events. The current day is visually emphasized with a bold, underlined
-number, matching the live card behavior in TRMNL mode.
+Preview uses fictional events for August 2026, with August 15 shown as today.
+Days 1–14 have a large X, and the current day is highlighted; a busy day shows
+`+7` hidden events.
 
 ## Installation
 
@@ -31,6 +31,7 @@ entities:
   - calendar.work
 display_mode: trmnl
 max_events: 8
+cross_out_past_days: true
 ```
 
 For manual installation, copy `idl-calendar.js` into `/config/www/` and register
@@ -43,6 +44,7 @@ For manual installation, copy `idl-calendar.js` into `/config/www/` and register
 | `entities` | Required | Non-empty list of Home Assistant calendar entity IDs. |
 | `month` | Current month | Optional fixed month as a quoted `YYYY-MM` string, e.g. `"2026-08"`. Omit to follow the current month automatically. |
 | `week_start` | `1` | First weekday: `1` for Monday or `0` for Sunday. |
+| `cross_out_past_days` | `true` | Draw a large X across each day before today. Set to `false` to disable. |
 | `max_events` | `8` | Maximum event names per cell; integer from 1 to 50. Available space may lower this limit. |
 | `refresh_interval` | `300` | Refresh interval in seconds; integer from 60 to 86400. |
 | `display_mode` | `responsive` | `responsive` for dashboards, `trmnl` for a fixed 800×480 canvas. |
@@ -58,7 +60,9 @@ event names. There is no month toolbar or secondary event panel. The full
 month/year remains available as an accessible label.
 No hours, “All day”/“Ongoing” labels, or calendar names are displayed.
 The current day cell uses a light gray background and a bold day number so it
-remains visible from a distance without adding extra decoration.
+remains visible from a distance. By default, a large X crosses every date before
+today, including its event names; set `cross_out_past_days: false` to hide these
+marks. This visual marker does not affect the event list or calendar data.
 
 Multi-day and overnight events appear on every day they overlap; an event ending
 at midnight does not appear on the following day. Events retain chronological

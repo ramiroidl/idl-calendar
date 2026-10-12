@@ -91,8 +91,12 @@ export class IdlCalendar extends HTMLElement {
         .weekday { text-align: center; font-size: 14px; line-height: 26px; }
         .month-name { font-size: 14px; font-weight: bold; line-height: 26px; padding-right: 4px; }
         .row-start { grid-column-start: 2; }
-        .day { min-width: 0; min-height: 0; padding: 3px; border: 1px solid #000;
+        .day { position: relative; min-width: 0; min-height: 0; padding: 3px; border: 1px solid #000;
           display: flex; flex-direction: column; overflow: hidden; }
+        .day.past::after { content: ""; position: absolute; inset: 0; pointer-events: none;
+          opacity: 0.5;
+          background: linear-gradient(135deg, transparent 47%, #000 49%, #000 51%, transparent 53%),
+            linear-gradient(45deg, transparent 47%, #000 49%, #000 51%, transparent 53%); }
         .day-number { font-size: 16px; line-height: 20px; flex: none; }
         .events { list-style: none; margin: 0; padding: 0; flex: 1; min-height: 0;
           font-size: 12px; line-height: 16px; overflow: hidden; }
@@ -124,9 +128,13 @@ export class IdlCalendar extends HTMLElement {
     const height = config.height ?? 480;
     const month = config.month == null ? null : eventDate(`${config.month}-01`);
     const weekStart = config.week_start ?? 1;
+    const crossOutPastDays = config.cross_out_past_days ?? true;
     if (!Number.isInteger(maxEvents) || maxEvents < 1 || maxEvents > 50
         || !Number.isInteger(refresh) || refresh < 60 || refresh > 86400) {
       throw new Error("max_events must be 1–50 and refresh_interval 60–86400 seconds.");
+    }
+    if (typeof crossOutPastDays !== "boolean") {
+      throw new Error("cross_out_past_days must be a boolean.");
     }
     if (!["responsive", "trmnl"].includes(display)) {
       throw new Error("display_mode must be responsive or trmnl.");
@@ -138,7 +146,8 @@ export class IdlCalendar extends HTMLElement {
     }
     this._config = { ...config, entities: [...new Set(config.entities)],
       max_events: maxEvents, refresh_interval: refresh, display_mode: display,
-      height: display === "trmnl" ? 480 : height, week_start: weekStart };
+      height: display === "trmnl" ? 480 : height, week_start: weekStart,
+      cross_out_past_days: crossOutPastDays };
     this._month = month;
     this._request++;
     this._events = [];
@@ -260,7 +269,8 @@ export class IdlCalendar extends HTMLElement {
       const day = new Date(start.getFullYear(), start.getMonth(), dayNumber);
       const dayEvents = eventsForDay(this._events, day);
       const cell = document.createElement("section");
-      cell.className = `day${rowStart}`;
+      const isPast = this._config.cross_out_past_days && dateKey(day) < dateKey(today);
+      cell.className = `day${rowStart}${isPast ? " past" : ""}`;
       cell.setAttribute("data-date", dateKey(day));
       cell.setAttribute("aria-label", `${day.toLocaleDateString(undefined, DAY_FORMAT)}: ${dayEvents.length} events${dayEvents.length ? `, ${dayEvents.map(event => event.summary).join(", ")}` : ""}`);
       if (dateKey(day) === dateKey(today)) cell.setAttribute("aria-current", "date");
