@@ -7,10 +7,11 @@ the abbreviated month name, weekday headings, day numbers, and event names. Ther
 selection, navigation, agenda, or event-editing controls. All options are set
 through the card configuration.
 
-![Static 800×480 calendar with past days crossed out, current day highlighted, event names, and +n overflow](docs/calendar-preview.png)
+![Static 800×480 calendar with past days crossed out, today's date in a black bar, event names, and +n overflow](docs/calendar-preview.png)
 
 Preview uses fictional events for August 2026, with August 15 shown as today.
-Days 1–14 have a large X, and the current day is highlighted; a busy day shows
+Days 1–14 have a large X, and August 15 has a black bar with a white day number;
+a busy day shows
 `+7` hidden events.
 
 ## Installation
@@ -59,10 +60,11 @@ weekday. Each non-interactive date cell contains its day number and a list of
 event names. There is no month toolbar or secondary event panel. The full
 month/year remains available as an accessible label.
 No hours, “All day”/“Ongoing” labels, or calendar names are displayed.
-The current day cell uses a light gray background and a bold day number so it
-remains visible from a distance. By default, a large X crosses every date before
-today, including its event names; set `cross_out_past_days: false` to hide these
-marks. This visual marker does not affect the event list or calendar data.
+The current day is marked by a full-width black bar at the top of its cell,
+with the day number in white so it remains visible from a distance. By default,
+a large X crosses every date before today, including its event names; set
+`cross_out_past_days: false` to hide these marks. This visual marker does not
+affect the event list or calendar data.
 
 Multi-day and overnight events appear on every day they overlap; an event ending
 at midnight does not appear on the following day. Events retain chronological

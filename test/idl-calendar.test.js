@@ -260,6 +260,9 @@ test("past days are crossed out by default and can be disabled", async () => {
   const today = new Date(2026, 7, 15);
   card._renderMonth(start, end, today);
   const classFor = date => card.shadowRoot.querySelector(`[data-date="${date}"]`).className;
+  assert.equal(card.shadowRoot.querySelector('[data-date="2026-08-15"]').getAttribute("aria-current"), "date");
+  assert.match(card.shadowRoot.innerHTML,
+    /\.day\[aria-current="date"\] \.day-number\s*\{[^}]*background: #000; color: #fff;/);
   assert.ok(classFor("2026-08-14").split(" ").includes("past"));
   assert.ok(!classFor("2026-08-15").split(" ").includes("past"));
   assert.ok(!classFor("2026-08-16").split(" ").includes("past"));
