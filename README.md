@@ -120,8 +120,10 @@ Home Assistant user's permissions.
 The upper-right corner of each forecast day shows a small monochrome weather
 icon and **high°/low°** temperatures. Icons distinguish sun, clouds, rain, snow,
 fog, and thunderstorms; accessible labels include the condition, high, low, and
-temperature unit. Today's forecast is white on its black date bar. Weather
-does not take event rows or change event overflow.
+temperature unit. On wide displays, weather shares the date header and today's
+forecast is white on its black date bar. Narrow cells stack temperatures below
+the icon, in black below the date bar, and reserve space above events to avoid
+overlapping the day number. Event overflow adapts to the remaining space.
 
 Forecasts come from [Open-Meteo](https://open-meteo.com/) using its
 [forecast API](https://open-meteo.com/en/docs), with no API key or additional Home

@@ -139,7 +139,7 @@ export class IdlCalendar extends HTMLElement {
         .month-name { font-size: 14px; font-weight: bold; line-height: 26px; padding-right: 4px; }
         .row-start { grid-column-start: 2; }
         .day { position: relative; min-width: 0; min-height: 0; padding: 3px; border: 1px solid #000;
-          display: flex; flex-direction: column; overflow: hidden; }
+          display: flex; flex-direction: column; overflow: hidden; container-type: inline-size; }
         .day.past::after { content: ""; position: absolute; inset: 0; pointer-events: none;
           opacity: 0.5;
           background: linear-gradient(135deg, transparent 47%, #000 49%, #000 51%, transparent 53%),
@@ -148,7 +148,16 @@ export class IdlCalendar extends HTMLElement {
         .weather { position: absolute; top: 3px; right: 3px; display: flex;
           align-items: center; gap: 2px; font-size: 10px; line-height: 20px; }
         .weather svg { width: 16px; height: 16px; }
+        .weather > span:first-child { display: flex; }
         .day[aria-current="date"] .weather { color: #fff; }
+        @container (max-width: 80px) {
+          .weather { flex-direction: column; align-items: flex-end; gap: 0;
+            font-size: 9px; line-height: 12px; }
+          .weather > span:first-child { height: 24px; }
+          .weather svg { width: 12px; height: 12px; }
+          .weather > span:last-child { color: #000; }
+          .events:has(+ .weather) { margin-top: 16px; }
+        }
         .events { list-style: none; margin: 0; padding: 0; flex: 1; min-height: 0;
           font-size: 12px; line-height: 16px; overflow: hidden; }
         .day-event, .count { display: block; height: 16px;
