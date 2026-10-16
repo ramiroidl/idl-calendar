@@ -1,4 +1,48 @@
 const DAY_FORMAT = { weekday: "short", month: "short", day: "numeric" };
+const WEATHER_INTERVAL = 3600000;
+const WEATHER_ICONS = {
+  sunny: '<circle cx="12" cy="12" r="4"/><path d="M12 1v3m0 16v3M1 12h3m16 0h3M4 4l2 2m12 12 2 2M4 20l2-2M18 6l2-2"/>',
+  cloudy: '<path d="M6 18a5 5 0 0 1-1-10 7 7 0 0 1 13-1 5.5 5.5 0 0 1 0 11Z"/>',
+  rainy: '<path d="M5 14a4 4 0 0 1 0-8 6 6 0 0 1 11-1 4.5 4.5 0 0 1 2 9M7 17l-2 4m8-4-2 4m8-4-2 4"/>',
+  snowy: '<path d="M12 2v20M3 7l18 10M3 17 21 7M9 4l3 3 3-3M9 20l3-3 3 3M3 10l4-1-1-4m12 14-1-4 4-1M3 14l4 1-1 4M18 5l-1 4 4 1"/>',
+  foggy: '<path d="M3 6h18M1 10h18M5 14h18M2 18h18"/>',
+  stormy: '<path d="M5 14a4 4 0 0 1 0-8 6 6 0 0 1 11-1 4.5 4.5 0 0 1 2 9M12 12l-4 6h5l-3 5"/>',
+  unknown: '<path d="M8 7a4 4 0 1 1 6 4c-2 1-2 2-2 4m0 3v2"/>',
+};
+
+export function weatherCondition(code) {
+  if (code === 0) return { icon: "sunny", label: "Sunny" };
+  if ([1, 2].includes(code)) return { icon: "cloudy", label: "Partly cloudy" };
+  if (code === 3) return { icon: "cloudy", label: "Overcast" };
+  if ([45, 48].includes(code)) return { icon: "foggy", label: "Fog" };
+  if ([51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82].includes(code)) {
+    return { icon: "rainy", label: "Rain" };
+  }
+  if ([71, 73, 75, 77, 85, 86].includes(code)) return { icon: "snowy", label: "Snow" };
+  if ([95, 96, 99].includes(code)) return { icon: "stormy", label: "Thunderstorm" };
+  return { icon: "unknown", label: "Unknown weather" };
+}
+
+export function normalizeForecast(data) {
+  const daily = data?.daily;
+  if (!daily || !["time", "weather_code", "temperature_2m_max", "temperature_2m_min"]
+    .every(key => Array.isArray(daily[key]) && daily[key].length === 7)
+      || !["°C", "°F"].includes(data.daily_units?.temperature_2m_max)
+      || data.daily_units.temperature_2m_min !== data.daily_units.temperature_2m_max) {
+    throw new Error("Invalid weather response");
+  }
+  if (new Set(daily.time).size !== 7) throw new Error("Duplicate forecast dates");
+  return new Map(daily.time.map((date, index) => {
+    const max = daily.temperature_2m_max[index];
+    const min = daily.temperature_2m_min[index];
+    if (typeof date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(date)
+        || !eventDate(date) || !Number.isFinite(max) || !Number.isFinite(min) || min > max) {
+      throw new Error("Invalid daily forecast");
+    }
+    return [date, { ...weatherCondition(daily.weather_code[index]), max: Math.round(max),
+      min: Math.round(min), unit: data.daily_units.temperature_2m_max }];
+  }));
+}
 
 export function dateKey(date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
@@ -73,6 +117,9 @@ export class IdlCalendar extends HTMLElement {
     this._loading = true;
     this._error = "";
     this._dayLists = [];
+    this._forecast = new Map();
+    this._weatherRequest = 0;
+    this._weatherError = "";
     this._resizeObserver = typeof ResizeObserver === "undefined" ? null
       : new ResizeObserver(() => this._fitEvents());
     this.shadowRoot.innerHTML = `
@@ -92,12 +139,25 @@ export class IdlCalendar extends HTMLElement {
         .month-name { font-size: 14px; font-weight: bold; line-height: 26px; padding-right: 4px; }
         .row-start { grid-column-start: 2; }
         .day { position: relative; min-width: 0; min-height: 0; padding: 3px; border: 1px solid #000;
-          display: flex; flex-direction: column; overflow: hidden; }
+          display: flex; flex-direction: column; overflow: hidden; container-type: inline-size; }
         .day.past::after { content: ""; position: absolute; inset: 0; pointer-events: none;
           opacity: 0.5;
           background: linear-gradient(135deg, transparent 47%, #000 49%, #000 51%, transparent 53%),
             linear-gradient(45deg, transparent 47%, #000 49%, #000 51%, transparent 53%); }
         .day-number { font-size: 16px; line-height: 20px; flex: none; }
+        .weather { position: absolute; top: 3px; right: 3px; display: flex;
+          align-items: center; gap: 2px; font-size: 10px; line-height: 20px; }
+        .weather svg { width: 16px; height: 16px; }
+        .weather > span:first-child { display: flex; }
+        .day[aria-current="date"] .weather { color: #fff; }
+        @container (max-width: 80px) {
+          .weather { flex-direction: column; align-items: flex-end; gap: 0;
+            font-size: 9px; line-height: 12px; }
+          .weather > span:first-child { height: 24px; }
+          .weather svg { width: 12px; height: 12px; }
+          .weather > span:last-child { color: #000; }
+          .events:has(+ .weather) { margin-top: 16px; }
+        }
         .events { list-style: none; margin: 0; padding: 0; flex: 1; min-height: 0;
           font-size: 12px; line-height: 16px; overflow: hidden; }
         .day-event, .count { display: block; height: 16px;
@@ -127,6 +187,7 @@ export class IdlCalendar extends HTMLElement {
     const month = config.month == null ? null : eventDate(`${config.month}-01`);
     const weekStart = config.week_start ?? 1;
     const crossOutPastDays = config.cross_out_past_days ?? true;
+    const weather = config.weather ?? true;
     if (!Number.isInteger(maxEvents) || maxEvents < 1 || maxEvents > 50
         || !Number.isInteger(refresh) || refresh < 60 || refresh > 86400) {
       throw new Error("max_events must be 1–50 and refresh_interval 60–86400 seconds.");
@@ -134,6 +195,7 @@ export class IdlCalendar extends HTMLElement {
     if (typeof crossOutPastDays !== "boolean") {
       throw new Error("cross_out_past_days must be a boolean.");
     }
+    if (typeof weather !== "boolean") throw new Error("weather must be a boolean.");
     if (!["responsive", "trmnl"].includes(display)) {
       throw new Error("display_mode must be responsive or trmnl.");
     }
@@ -145,35 +207,45 @@ export class IdlCalendar extends HTMLElement {
     this._config = { ...config, entities: [...new Set(config.entities)],
       max_events: maxEvents, refresh_interval: refresh, display_mode: display,
       height: display === "trmnl" ? 480 : height, week_start: weekStart,
-      cross_out_past_days: crossOutPastDays };
+      cross_out_past_days: crossOutPastDays, weather };
     this._month = month;
     this._request++;
     this._events = [];
     this._error = "";
     this._loading = true;
     this._lastFetch = 0;
+    this._resetWeather();
     this.setAttribute("display-mode", display);
     this.shadowRoot.querySelector("ha-card").setAttribute("style", `height: ${this._config.height}px`);
     this._render();
     this._startTimer();
-    if (this._hass && this.isConnected) void this._refresh();
+    if (this._hass && this.isConnected) {
+      void this._refresh();
+      void this._refreshWeather();
+    }
   }
 
   set hass(hass) {
     this._hass = hass;
     if (this._config && this.isConnected && !this._lastFetch) void this._refresh();
+    void this._refreshWeather();
   }
 
   connectedCallback() {
     this._resizeObserver?.observe(this.shadowRoot.querySelector("#month"));
     this._fitEvents();
     this._startTimer();
-    if (this._hass && this._config) void this._refresh();
+    if (this._hass && this._config) {
+      void this._refresh();
+      void this._refreshWeather();
+    }
   }
 
   disconnectedCallback() {
     this._resizeObserver?.disconnect();
     clearInterval(this._timer);
+    clearInterval(this._weatherTimer);
+    this._resetWeather();
     this._request++;
     this._lastFetch = 0;
   }
@@ -188,9 +260,65 @@ export class IdlCalendar extends HTMLElement {
 
   _startTimer() {
     clearInterval(this._timer);
+    clearInterval(this._weatherTimer);
     if (this.isConnected && this._config) {
       this._timer = setInterval(() => void this._refresh(), this._config.refresh_interval * 1000);
+      if (this._config.weather) {
+        this._weatherTimer = setInterval(() => void this._refreshWeather(true), WEATHER_INTERVAL);
+      }
     }
+  }
+
+  _resetWeather() {
+    this._weatherRequest++;
+    this._weatherController?.abort();
+    this._weatherKey = null;
+    this._weatherFetched = null;
+    this._forecast.clear();
+    this._weatherError = "";
+  }
+
+  async _refreshWeather(force = false) {
+    if (!this._hass || !this._config?.weather || !this.isConnected) return;
+    const config = this._hass.config;
+    const latitude = config?.latitude;
+    const longitude = config?.longitude;
+    const unit = config?.unit_system?.temperature === "°F" ? "fahrenheit" : "celsius";
+    const timezone = config?.time_zone || "auto";
+    const key = JSON.stringify([latitude, longitude, unit, timezone]);
+    if (!force && key === this._weatherKey && this._weatherFetched !== null
+        && Date.now() - this._weatherFetched < WEATHER_INTERVAL) return;
+    const changed = key !== this._weatherKey;
+    const request = ++this._weatherRequest;
+    this._weatherController?.abort();
+    const controller = new AbortController();
+    this._weatherController = controller;
+    this._weatherKey = key;
+    this._weatherFetched = Date.now();
+    if (changed) this._forecast.clear();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+    try {
+      if (!Number.isFinite(latitude) || Math.abs(latitude) > 90
+          || !Number.isFinite(longitude) || Math.abs(longitude) > 180) {
+        throw new Error("Home Assistant coordinates unavailable");
+      }
+      const query = new URLSearchParams({ latitude, longitude, timezone, temperature_unit: unit,
+        daily: "weather_code,temperature_2m_max,temperature_2m_min", forecast_days: "7" });
+      const response = await fetch(`https://api.open-meteo.com/v1/forecast?${query}`,
+        { signal: controller.signal, credentials: "omit", referrerPolicy: "no-referrer" });
+      if (!response.ok) throw new Error("Weather unavailable");
+      const forecast = normalizeForecast(await response.json());
+      if (request !== this._weatherRequest || !this.isConnected) return;
+      this._forecast = forecast;
+      this._weatherError = "";
+    } catch {
+      if (request !== this._weatherRequest || !this.isConnected) return;
+      this._forecast.clear();
+      this._weatherError = "Weather unavailable. Retrying automatically.";
+    } finally {
+      clearTimeout(timeout);
+    }
+    this._render();
   }
 
   _range() {
@@ -229,8 +357,11 @@ export class IdlCalendar extends HTMLElement {
     if (!this._config) return;
     const root = this.shadowRoot;
     const { start, end } = this._range();
-    root.querySelector("#status").textContent = this._loading ? "Loading calendar…"
-      : this._error || (this._events.length ? "" : "No events this month.");
+    root.querySelector("#status").textContent = [
+      this._loading ? "Loading calendar…"
+        : this._error || (this._events.length ? "" : "No events this month."),
+      this._weatherError,
+    ].filter(Boolean).join(" ");
     root.querySelector("#month").setAttribute("aria-label",
       start.toLocaleDateString(undefined, { month: "long", year: "numeric" }));
     this._renderMonth(start, end, new Date());
@@ -278,6 +409,24 @@ export class IdlCalendar extends HTMLElement {
       const list = document.createElement("ul");
       list.className = "events";
       cell.append(number, list);
+      const forecast = this._config.weather && dateKey(day) >= dateKey(today)
+        && dateKey(day) < dateKey(calendarRange(7, today).end)
+        ? this._forecast.get(dateKey(day)) : null;
+      if (forecast) {
+        const weather = document.createElement("span");
+        weather.className = "weather";
+        const label = `${forecast.label}, high ${forecast.max}${forecast.unit}, low ${forecast.min}${forecast.unit}`;
+        weather.setAttribute("aria-label", label);
+        weather.setAttribute("title", label);
+        const icon = document.createElement("span");
+        icon.setAttribute("aria-hidden", "true");
+        icon.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${WEATHER_ICONS[forecast.icon]}</svg>`;
+        const temperatures = document.createElement("span");
+        temperatures.textContent = `${forecast.max}°/${forecast.min}°`;
+        weather.append(icon, temperatures);
+        cell.append(weather);
+      }
       this._dayLists.push({ list, events: dayEvents });
       grid.append(cell);
     }

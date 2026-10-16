@@ -41,7 +41,8 @@ globalThis.ResizeObserver = class {
 };
 
 const { IdlCalendar, calendarRange, monthRange, eventsForDay, dateKey,
-  normalizeEvent, sortEvents, visibleEventCount } = await import("../idl-calendar.js");
+  normalizeEvent, sortEvents, visibleEventCount, normalizeForecast,
+  weatherCondition } = await import("../idl-calendar.js");
 
 test("calendar range starts at local midnight and spans calendar days", () => {
   const { start, end } = calendarRange(7, new Date(2026, 9, 6, 15, 30));
@@ -84,7 +85,7 @@ test("configuration validates entities, bounds and configured month", () => {
     ...[{ max_events: 0 }, { max_events: 51 }, { refresh_interval: 1 },
       { display_mode: "invalid" }, { week_start: 2 }, { height: 359 }, { height: 2161 },
       { month: "2026-13" }, { month: "2026-02-01" }, { month: 2026 },
-      { cross_out_past_days: "no" }]
+      { cross_out_past_days: "no" }, { weather: "yes" }]
       .map(options => ({ entities: ["calendar.test"], ...options }))]) {
     assert.throws(() => card.setConfig(config));
   }
@@ -95,8 +96,221 @@ test("configuration validates entities, bounds and configured month", () => {
   card.setConfig({ entities: ["calendar.test"], display_mode: "trmnl", height: 600 });
   assert.equal(card._config.height, 480);
   assert.equal(card._config.cross_out_past_days, true);
+  assert.equal(card._config.weather, true);
   card.setConfig({ entities: ["calendar.test"], cross_out_past_days: false });
   assert.equal(card._config.cross_out_past_days, false);
+});
+
+function forecastData(start = new Date(), unit = "°C") {
+  return {
+    daily: {
+      time: Array.from({ length: 7 }, (_, index) => dateKey(calendarRange(index, start).end)),
+      weather_code: [0, 2, 61, 71, 45, 95, 3],
+      temperature_2m_max: [24.4, 23, 18, 0, 19, 21, 22],
+      temperature_2m_min: [12.6, 12, 10, -5, 11, 14, 13],
+    },
+    daily_units: { temperature_2m_max: unit, temperature_2m_min: unit },
+  };
+}
+
+test("forecast normalization retains local dates, rounds temperatures and maps WMO codes", () => {
+  const forecast = normalizeForecast(forecastData(new Date(2026, 11, 29)));
+  assert.equal(forecast.size, 7);
+  assert.deepEqual(forecast.get("2026-12-29"),
+    { icon: "sunny", label: "Sunny", max: 24, min: 13, unit: "°C" });
+  assert.equal(forecast.get("2027-01-01").min, -5);
+  assert.deepEqual([...forecast.values()].map(day => day.icon),
+    ["sunny", "cloudy", "rainy", "snowy", "foggy", "stormy", "cloudy"]);
+  for (const code of [51, 53, 55, 56, 57, 63, 65, 66, 67, 80, 81, 82]) {
+    assert.equal(weatherCondition(code).icon, "rainy");
+  }
+  for (const code of [73, 75, 77, 85, 86]) assert.equal(weatherCondition(code).icon, "snowy");
+  for (const code of [96, 99]) assert.equal(weatherCondition(code).icon, "stormy");
+  assert.equal(weatherCondition(48).icon, "foggy");
+  assert.equal(weatherCondition(999).icon, "unknown");
+  assert.equal(weatherCondition("<svg>").icon, "unknown");
+  assert.equal(normalizeForecast(forecastData(new Date(), "°F")).values().next().value.unit, "°F");
+});
+
+test("invalid or incomplete forecasts cannot appear as zero-degree weather", () => {
+  for (const change of [
+    data => { data.daily.temperature_2m_min[0] = null; },
+    data => { data.daily.temperature_2m_max[0] = "24"; },
+    data => { data.daily.temperature_2m_max[0] = Infinity; },
+    data => { data.daily.temperature_2m_min[0] = 50; },
+    data => { data.daily.time[0] = "2026-02-30"; },
+    data => { data.daily.time[0] = data.daily.time[1]; },
+    data => { data.daily.weather_code.pop(); },
+    data => { data.daily_units.temperature_2m_max = "<img>"; },
+    data => { data.daily_units.temperature_2m_min = "°F"; },
+  ]) {
+    const data = forecastData();
+    change(data);
+    assert.throws(() => normalizeForecast(data));
+  }
+  assert.throws(() => normalizeForecast({}));
+  assert.throws(() => normalizeForecast(null));
+});
+
+function weatherCard(config = {}) {
+  const card = makeCard(["calendar.work"], async () => [todayEvent()], config);
+  card._hass.config = { latitude: 0, longitude: -58.4, time_zone: "America/Argentina/Buenos_Aires",
+    unit_system: { temperature: "°C" } };
+  return card;
+}
+
+test("weather uses HA coordinates and units without credentials, with independent hourly refresh", async t => {
+  const calls = [];
+  t.mock.method(globalThis, "fetch", async (...args) => {
+    calls.push(args);
+    return { ok: true, json: async () => forecastData() };
+  });
+  const card = weatherCard({ refresh_interval: 86400 });
+  await card._refreshWeather();
+  const url = new URL(calls[0][0]);
+  assert.equal(url.origin, "https://api.open-meteo.com");
+  for (const [key, value] of Object.entries({ latitude: "0", longitude: "-58.4",
+    timezone: "America/Argentina/Buenos_Aires", temperature_unit: "celsius", forecast_days: "7",
+    daily: "weather_code,temperature_2m_max,temperature_2m_min" })) {
+    assert.equal(url.searchParams.get(key), value);
+  }
+  assert.equal(calls[0][1].credentials, "omit");
+  assert.equal(calls[0][1].referrerPolicy, "no-referrer");
+  assert.equal(calls[0][1].headers, undefined);
+  await card._refreshWeather();
+  await card._refresh();
+  assert.equal(calls.length, 1);
+  card._startTimer();
+  assert.equal(card._weatherTimer._idleTimeout, 3600000);
+  assert.equal(card._timer._idleTimeout, 86400000);
+  card._weatherTimer._onTimeout();
+  await card._refreshWeather();
+  assert.equal(calls.length, 2);
+  card._weatherFetched -= 3600000;
+  await card._refreshWeather();
+  assert.equal(calls.length, 3);
+  card._hass.config.unit_system.temperature = "°F";
+  await card._refreshWeather();
+  assert.equal(new URL(calls[3][0]).searchParams.get("temperature_unit"), "fahrenheit");
+  card._hass.config.longitude = 20;
+  await card._refreshWeather();
+  assert.equal(new URL(calls[4][0]).searchParams.get("longitude"), "20");
+  card.disconnectedCallback();
+  assert.equal(card._weatherTimer._destroyed, true);
+});
+
+test("weather renders only today and the next six days without replacing events or today styling", () => {
+  const card = weatherCard({ month: "2026-08" });
+  card._forecast = normalizeForecast(forecastData(new Date(2026, 7, 15)));
+  card._events = [normalizeEvent({ start: "2026-08-15", end: "2026-08-16",
+    summary: "Lunch" }, "Family")];
+  card._renderMonth(new Date(2026, 7, 1), new Date(2026, 8, 1), new Date(2026, 7, 15));
+  const grid = card.shadowRoot.querySelector("#month");
+  const forecasts = grid.children.flatMap(cell => cell.children.filter(child => child.className === "weather"));
+  assert.equal(forecasts.length, 7);
+  assert.match(forecasts[0].getAttribute("aria-label"), /Sunny, high 24°C, low 13°C/);
+  assert.equal(forecasts[0].children[1].textContent, "24°/13°");
+  assert.match(forecasts[0].children[0].innerHTML, /<svg/);
+  const today = card.shadowRoot.querySelector('[data-date="2026-08-15"]');
+  assert.equal(today.getAttribute("aria-current"), "date");
+  assert.equal(today.children[1].children[0].textContent, "Lunch");
+  card._renderMonth(new Date(2026, 7, 1), new Date(2026, 8, 1), new Date(2026, 7, 16));
+  assert.equal(card.shadowRoot.querySelector('[data-date="2026-08-15"]').children.length, 2);
+  card._renderMonth(new Date(2026, 8, 1), new Date(2026, 9, 1), new Date(2026, 7, 15));
+  assert.ok(grid.children.every(cell => cell.children.length <= 2));
+});
+
+test("weather failures and missing coordinates do not hide calendar events and retry hourly", async t => {
+  let calls = 0;
+  t.mock.method(globalThis, "fetch", async () => {
+    calls++;
+    return { ok: calls !== 2, json: async () => forecastData() };
+  });
+  const card = weatherCard();
+  await card._refresh();
+  await card._refreshWeather();
+  assert.equal(card._forecast.size, 7);
+  await card._refreshWeather(true);
+  assert.equal(card._forecast.size, 0);
+  assert.equal(card._events.length, 1);
+  assert.match(card.shadowRoot.querySelector("#status").textContent, /Weather unavailable/);
+  await card._refreshWeather();
+  assert.equal(calls, 2);
+  await card._refreshWeather(true);
+  assert.equal(card._forecast.size, 7);
+  assert.equal(card._weatherError, "");
+  for (const latitude of [undefined, null, "0", 91]) {
+    card._hass.config.latitude = latitude;
+    await card._refreshWeather();
+    assert.equal(card._forecast.size, 0);
+  }
+  assert.equal(calls, 3);
+});
+
+test("disabled weather never fetches and configuration/disconnect invalidate pending forecasts", async t => {
+  const pending = [];
+  t.mock.method(globalThis, "fetch", (_, options) => new Promise(resolve => {
+    pending.push({ resolve, signal: options.signal });
+  }));
+  const card = weatherCard();
+  const old = card._refreshWeather();
+  card._hass.config.longitude = 30;
+  const latest = card._refreshWeather();
+  assert.equal(pending[0].signal.aborted, true);
+  pending[1].resolve({ ok: true, json: async () => forecastData(new Date(), "°F") });
+  await latest;
+  pending[0].resolve({ ok: true, json: async () => forecastData() });
+  await old;
+  assert.equal(card._forecast.values().next().value.unit, "°F");
+  const disconnected = card._refreshWeather(true);
+  card.isConnected = false;
+  card.disconnectedCallback();
+  assert.equal(pending[2].signal.aborted, true);
+  pending[2].resolve({ ok: true, json: async () => forecastData() });
+  await disconnected;
+  assert.equal(card._forecast.size, 0);
+  card.setConfig({ entities: ["calendar.work"], weather: false });
+  card.isConnected = true;
+  await card._refreshWeather();
+  assert.equal(pending.length, 3);
+  card.disconnectedCallback();
+});
+
+test("changing configuration aborts weather requests and prevents stale forecasts", async t => {
+  let resolve;
+  let signal;
+  t.mock.method(globalThis, "fetch", (_, options) => {
+    signal = options.signal;
+    return new Promise(done => { resolve = done; });
+  });
+  const card = weatherCard();
+  const pending = card._refreshWeather();
+  card.setConfig({ entities: ["calendar.work"], weather: false });
+  assert.equal(signal.aborted, true);
+  resolve({ ok: true, json: async () => forecastData() });
+  await pending;
+  assert.equal(card._forecast.size, 0);
+  card.disconnectedCallback();
+});
+
+test("weather requests time out without interfering with calendar availability", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let signal;
+  t.mock.method(globalThis, "fetch", (_, options) => {
+    signal = options.signal;
+    return new Promise((_, reject) => {
+      signal.addEventListener("abort", () => reject(new Error("Aborted")), { once: true });
+    });
+  });
+  const card = weatherCard();
+  await card._refresh();
+  const pending = card._refreshWeather();
+  t.mock.timers.tick(15000);
+  await pending;
+  assert.equal(signal.aborted, true);
+  assert.equal(card._events.length, 1);
+  assert.equal(card._forecast.size, 0);
+  assert.match(card._weatherError, /Weather unavailable/);
 });
 
 function makeCard(entities, callApi, config = {}) {
