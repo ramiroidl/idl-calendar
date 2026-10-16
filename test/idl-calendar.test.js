@@ -276,6 +276,43 @@ test("disabled weather never fetches and configuration/disconnect invalidate pen
   card.disconnectedCallback();
 });
 
+test("changing configuration aborts weather requests and prevents stale forecasts", async t => {
+  let resolve;
+  let signal;
+  t.mock.method(globalThis, "fetch", (_, options) => {
+    signal = options.signal;
+    return new Promise(done => { resolve = done; });
+  });
+  const card = weatherCard();
+  const pending = card._refreshWeather();
+  card.setConfig({ entities: ["calendar.work"], weather: false });
+  assert.equal(signal.aborted, true);
+  resolve({ ok: true, json: async () => forecastData() });
+  await pending;
+  assert.equal(card._forecast.size, 0);
+  card.disconnectedCallback();
+});
+
+test("weather requests time out without interfering with calendar availability", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let signal;
+  t.mock.method(globalThis, "fetch", (_, options) => {
+    signal = options.signal;
+    return new Promise((_, reject) => {
+      signal.addEventListener("abort", () => reject(new Error("Aborted")), { once: true });
+    });
+  });
+  const card = weatherCard();
+  await card._refresh();
+  const pending = card._refreshWeather();
+  t.mock.timers.tick(15000);
+  await pending;
+  assert.equal(signal.aborted, true);
+  assert.equal(card._events.length, 1);
+  assert.equal(card._forecast.size, 0);
+  assert.match(card._weatherError, /Weather unavailable/);
+});
+
 function makeCard(entities, callApi, config = {}) {
   const card = new IdlCalendar();
   card.setConfig({ entities, ...config });
